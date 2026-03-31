@@ -6,6 +6,7 @@
   <title>Energy-Aware CPU Scheduling Simulator</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta name="google-site-verification" content="google6654fa3101acab01.html" />
 </head>
 <body>
   <div class="page-shell">
@@ -21,7 +22,7 @@
     </header>
 
     <main class="dashboard">
-      <section class="panel">
+      <section class="panel panel-processes">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Workload</p>
@@ -49,7 +50,7 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel panel-config">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Configuration</p>
@@ -86,7 +87,7 @@
         </div>
       </section>
 
-      <section class="panel">
+      <section class="panel panel-results">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Results</p>
@@ -102,17 +103,28 @@
         <div id="metrics" class="metrics-panel"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel panel-timeline">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Timeline</p>
             <h2>Execution Gantt View</h2>
           </div>
+          <div class="timeline-controls">
+            <button id="timelinePlayButton" class="secondary-btn" type="button" onclick="playTimeline()">Play</button>
+            <button id="timelinePauseButton" class="secondary-btn" type="button" onclick="pauseTimeline()">Pause</button>
+            <button id="timelineReplayButton" class="secondary-btn" type="button" onclick="replayTimeline()">Replay</button>
+          </div>
+        </div>
+        <div class="timeline-header">
+          <div id="timelineLegend" class="timeline-legend">
+            Animated playback highlights one execution slice at a time.
+          </div>
+          <div id="timelineClock" class="timeline-clock">Time 0</div>
         </div>
         <div id="gantt" class="gantt-grid"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel panel-process-metrics">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Process Metrics</p>
@@ -122,7 +134,7 @@
         <div id="processMetrics"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel panel-charts">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Charts</p>
@@ -130,24 +142,56 @@
           </div>
         </div>
 
+        <div class="chart-toolbar">
+          <label class="field compact-field">
+            <span>Chart View</span>
+            <select id="chartViewSelect" onchange="handleChartSelection()">
+              <option value="all">All Charts</option>
+              <option value="energy">Energy vs Time</option>
+              <option value="comparison">Algorithm Comparison</option>
+              <option value="utilization">CPU Utilization</option>
+            </select>
+          </label>
+
+          <label class="toggle-field" for="liveChartsToggle">
+            <span>Live Chart Updates</span>
+            <span class="toggle-switch">
+              <input id="liveChartsToggle" type="checkbox" checked onchange="handleLiveToggle()" />
+              <span class="toggle-slider"></span>
+            </span>
+          </label>
+        </div>
+
+        <div id="chartLiveStatus" class="chart-status">
+          Showing all charts with live updates enabled.
+        </div>
+
         <div class="chart-grid">
-          <article class="chart-card">
+          <article class="chart-card" data-chart="energy">
             <h3>Energy vs Time</h3>
             <canvas id="energyChart"></canvas>
           </article>
 
-          <article class="chart-card">
+          <article class="chart-card" data-chart="comparison">
             <h3>Algorithm Comparison</h3>
             <canvas id="comparisonChart"></canvas>
           </article>
 
-          <article class="chart-card">
+          <article class="chart-card" data-chart="utilization">
             <h3>CPU Utilization</h3>
             <canvas id="utilizationChart"></canvas>
           </article>
         </div>
       </section>
     </main>
+
+    <footer class="site-footer">
+      <p class="footer-copy">© 2026 Om Rajpurohit. Energy-Aware CPU Scheduling Simulator.</p>
+      <div class="footer-actions">
+        <a class="footer-btn" href="https://github.com/OmRajpurohit/cpu-scheduling-algo" target="_blank" rel="noreferrer">GitHub</a>
+        <a class="footer-btn" href="https://github.com/OmRajpurohit/cpu-scheduling-algo/issues/new" target="_blank" rel="noreferrer">Feedback</a>
+      </div>
+    </footer>
   </div>
 
   <script type="module" src="app.js"></script>

@@ -11,8 +11,12 @@ const DEFAULT_ROWS = [
 ];
 
 const BAR_COLORS = ["#0f766e", "#2563eb", "#d97706", "#7c3aed", "#dc2626", "#0891b2"];
+const TIMELINE_STEP_MS = 700;
 
 let processCount = 0;
+let latestSimulationResult = null;
+let activeTimelineTimer = null;
+let timelineState = createTimelineState();
 
 function addRow(process = {}) {
   const table = document.querySelector("#processTable tbody");
@@ -115,12 +119,11 @@ async function runSimulation() {
   try {
     const result = await requestSchedule(data);
 
+    latestSimulationResult = result;
     renderSummary(result);
     renderGantt(result.gantt);
     renderProcessMetrics(result.processes);
-    renderEnergyChart(result);
-    renderComparisonChart(result);
-    renderUtilizationChart(result);
+    renderCharts(result);
 
     setServerBadge("API connected", true);
     setStatus(
@@ -196,6 +199,22 @@ async function checkApiHealth() {
   setServerBadge("API offline", false);
 }
 
+function renderCharts(result) {
+  const liveChartsEnabled = document.getElementById("liveChartsToggle").checked;
+
+  applyChartSelection();
+
+  if (!liveChartsEnabled) {
+    updateChartStatus("Live chart updates are paused. Turn the toggle on to refresh the selected chart.", "paused");
+    return;
+  }
+
+  renderEnergyChart(result);
+  renderComparisonChart(result);
+  renderUtilizationChart(result);
+  updateChartStatus(getChartSelectionMessage(), "active");
+}
+
 function renderSummary(result) {
   const summary = result.summary;
   const metrics = result.metrics;
@@ -239,9 +258,17 @@ function renderSummary(result) {
 
 function renderGantt(gantt) {
   const container = document.getElementById("gantt");
+  const clock = document.getElementById("timelineClock");
+  const legend = document.getElementById("timelineLegend");
+
+  resetTimelineAnimation();
 
   if (!gantt.length) {
     container.innerHTML = `<p class="empty-state">No execution timeline available yet.</p>`;
+    clock.textContent = "Time 0";
+    legend.textContent = "Animated playback highlights one execution slice at a time.";
+    timelineState = createTimelineState();
+    syncTimelineControls();
     return;
   }
 
@@ -252,13 +279,16 @@ function renderGantt(gantt) {
     const color = BAR_COLORS[index % BAR_COLORS.length];
 
     return `
-      <article class="gantt-bar" style="width:${width}%; background:${color}">
+      <article class="gantt-bar pending" data-index="${index}" style="width:${width}%; background:${color}">
         <span class="gantt-title">${segment.process}</span>
         <span class="gantt-time">${segment.start} to ${segment.end}</span>
         <span class="gantt-meta">${segment.energy} energy | ${segment.utilization}% load</span>
+        <span class="gantt-progress"></span>
       </article>
     `;
   }).join("");
+
+  loadTimeline(gantt);
 }
 
 function renderProcessMetrics(processes) {
@@ -306,6 +336,12 @@ function clearResults() {
   document.getElementById("metrics").innerHTML = "";
   document.getElementById("gantt").innerHTML = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
   document.getElementById("processMetrics").innerHTML = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
+  document.getElementById("timelineClock").textContent = "Time 0";
+  document.getElementById("timelineLegend").textContent = "Animated playback highlights one execution slice at a time.";
+  timelineState = createTimelineState();
+  resetTimelineAnimation();
+  syncTimelineControls();
+  updateChartStatus("Run a simulation to populate the selected chart view.", "idle");
 }
 
 function getApiEndpoints(path) {
@@ -326,6 +362,245 @@ function setServerBadge(message, isOnline) {
   badge.className = `server-badge ${isOnline === true ? "online" : isOnline === false ? "offline" : "pending"}`;
 }
 
+function applyChartSelection() {
+  const selectedChart = document.getElementById("chartViewSelect").value;
+  const cards = document.querySelectorAll(".chart-card");
+
+  cards.forEach(card => {
+    const isVisible = selectedChart === "all" || card.dataset.chart === selectedChart;
+    card.classList.toggle("hidden", !isVisible);
+  });
+}
+
+function getChartSelectionMessage() {
+  const selectedChart = document.getElementById("chartViewSelect").value;
+
+  switch (selectedChart) {
+    case "energy":
+      return "Showing the Energy vs Time chart with live updates enabled.";
+    case "comparison":
+      return "Showing the Algorithm Comparison chart with live updates enabled.";
+    case "utilization":
+      return "Showing the CPU Utilization chart with live updates enabled.";
+    default:
+      return "Showing all charts with live updates enabled.";
+  }
+}
+
+function updateChartStatus(message, tone = "active") {
+  const element = document.getElementById("chartLiveStatus");
+  element.textContent = message;
+  element.className = `chart-status ${tone}`;
+}
+
+function handleChartSelection() {
+  applyChartSelection();
+
+  if (!document.getElementById("liveChartsToggle").checked) {
+    updateChartStatus("Live chart updates are paused. The selected chart layout is ready when you turn them back on.", "paused");
+    return;
+  }
+
+  if (latestSimulationResult) {
+    renderCharts(latestSimulationResult);
+    return;
+  }
+
+  updateChartStatus("Select a chart now, then run a simulation to view it live.", "idle");
+}
+
+function handleLiveToggle() {
+  const liveChartsEnabled = document.getElementById("liveChartsToggle").checked;
+
+  if (!liveChartsEnabled) {
+    updateChartStatus("Live chart updates are paused. Existing results stay visible until the next live refresh.", "paused");
+    return;
+  }
+
+  if (latestSimulationResult) {
+    renderCharts(latestSimulationResult);
+    return;
+  }
+
+  updateChartStatus(getChartSelectionMessage().replace("Showing", "Ready to show"), "active");
+}
+
+function getTimelineBars() {
+  return Array.from(document.querySelectorAll(".gantt-bar"));
+}
+
+function loadTimeline(gantt) {
+  timelineState = {
+    gantt,
+    currentIndex: 0,
+    paused: false,
+    completed: false
+  };
+
+  updateTimelineBanner("Playback started. Processes will appear in execution order.", gantt[0].start);
+  syncTimelineControls();
+  scheduleNextTimelineStep();
+}
+
+function runTimelineStep() {
+  const { gantt, currentIndex } = timelineState;
+  const bars = getTimelineBars();
+
+  bars.forEach((bar, index) => {
+    bar.classList.toggle("completed", index < currentIndex);
+    bar.classList.toggle("active", index === currentIndex);
+    bar.classList.toggle("pending", index > currentIndex);
+  });
+
+  if (currentIndex >= gantt.length) {
+    finishTimelinePlayback();
+    return;
+  }
+
+  const segment = gantt[currentIndex];
+  updateTimelineBanner(
+    `${segment.process} is executing from ${segment.start} to ${segment.end} with ${segment.utilization}% CPU load.`,
+    segment.end
+  );
+
+  timelineState.currentIndex += 1;
+  syncTimelineControls();
+  scheduleNextTimelineStep();
+}
+
+function scheduleNextTimelineStep() {
+  resetTimelineAnimation();
+
+  if (timelineState.paused || timelineState.completed || timelineState.gantt.length === 0) {
+    syncTimelineControls();
+    return;
+  }
+
+  if (timelineState.currentIndex >= timelineState.gantt.length) {
+    finishTimelinePlayback();
+    return;
+  }
+
+  activeTimelineTimer = window.setTimeout(runTimelineStep, TIMELINE_STEP_MS);
+}
+
+function finishTimelinePlayback() {
+  const finishedSegment = timelineState.gantt[timelineState.gantt.length - 1];
+  timelineState.completed = true;
+  timelineState.paused = false;
+  resetTimelineAnimation();
+  updateTimelineVisuals();
+  updateTimelineBanner(
+    `Execution complete. ${timelineState.gantt.length} slices finished across the visible timeline.`,
+    finishedSegment.end
+  );
+  syncTimelineControls();
+}
+
+function updateTimelineVisuals() {
+  const clock = document.getElementById("timelineClock");
+  const legend = document.getElementById("timelineLegend");
+
+  if (timelineState.gantt.length === 0) {
+    clock.textContent = "Time 0";
+    legend.textContent = "Animated playback highlights one execution slice at a time.";
+    return;
+  }
+
+  const bars = getTimelineBars();
+  const currentIndex = timelineState.currentIndex;
+
+  bars.forEach((bar, index) => {
+    bar.classList.toggle("completed", index < currentIndex || timelineState.completed);
+    bar.classList.toggle("active", !timelineState.completed && index === currentIndex);
+    bar.classList.toggle("pending", !timelineState.completed && index > currentIndex);
+  });
+}
+
+function updateTimelineBanner(message, time) {
+  document.getElementById("timelineClock").textContent = `Time ${time}`;
+  document.getElementById("timelineLegend").textContent = message;
+}
+
+function playTimeline() {
+  if (timelineState.gantt.length === 0) {
+    updateTimelineBanner("Run a simulation first to unlock timeline playback controls.", 0);
+    return;
+  }
+
+  if (timelineState.completed) {
+    replayTimeline();
+    return;
+  }
+
+  timelineState.paused = false;
+  syncTimelineControls();
+  scheduleNextTimelineStep();
+}
+
+function pauseTimeline() {
+  if (timelineState.gantt.length === 0 || timelineState.completed) {
+    return;
+  }
+
+  timelineState.paused = true;
+  resetTimelineAnimation();
+  updateTimelineVisuals();
+  updateTimelineBanner("Timeline paused. Press play to continue from the current execution slice.", getCurrentTimelineTime());
+  syncTimelineControls();
+}
+
+function replayTimeline() {
+  if (timelineState.gantt.length === 0) {
+    updateTimelineBanner("Run a simulation first to replay the CPU execution timeline.", 0);
+    return;
+  }
+
+  resetTimelineAnimation();
+  timelineState.currentIndex = 0;
+  timelineState.paused = false;
+  timelineState.completed = false;
+  updateTimelineVisuals();
+  updateTimelineBanner("Replay started. Processes will appear again from the beginning.", timelineState.gantt[0].start);
+  syncTimelineControls();
+  scheduleNextTimelineStep();
+}
+
+function getCurrentTimelineTime() {
+  if (timelineState.currentIndex === 0) {
+    return timelineState.gantt[0]?.start ?? 0;
+  }
+
+  return timelineState.gantt[Math.min(timelineState.currentIndex - 1, timelineState.gantt.length - 1)]?.end ?? 0;
+}
+
+function syncTimelineControls() {
+  const hasTimeline = timelineState.gantt.length > 0;
+  const playButton = document.getElementById("timelinePlayButton");
+  const pauseButton = document.getElementById("timelinePauseButton");
+  const replayButton = document.getElementById("timelineReplayButton");
+
+  playButton.disabled = !hasTimeline || (!timelineState.paused && !timelineState.completed);
+  pauseButton.disabled = !hasTimeline || timelineState.paused || timelineState.completed;
+  replayButton.disabled = !hasTimeline;
+}
+
+function resetTimelineAnimation() {
+  if (activeTimelineTimer) {
+    window.clearTimeout(activeTimelineTimer);
+    activeTimelineTimer = null;
+  }
+}
+
+function createTimelineState() {
+  return {
+    gantt: [],
+    currentIndex: 0,
+    paused: false,
+    completed: false
+  };
+}
+
 function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -334,6 +609,7 @@ function initialize() {
   loadDemoData();
   clearResults();
   setServerBadge("Waiting for API");
+  applyChartSelection();
   checkApiHealth();
 }
 
@@ -341,5 +617,10 @@ window.addRow = addRow;
 window.deleteRow = deleteRow;
 window.runSimulation = runSimulation;
 window.loadDemoData = loadDemoData;
+window.handleChartSelection = handleChartSelection;
+window.handleLiveToggle = handleLiveToggle;
+window.playTimeline = playTimeline;
+window.pauseTimeline = pauseTimeline;
+window.replayTimeline = replayTimeline;
 
 initialize();
