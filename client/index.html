@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Energy-Aware CPU Scheduling Simulator</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Operating Systems Lab</p>
+        <h1>Energy-Aware CPU Scheduling Simulator</h1>
+        <p class="hero-copy">
+          Model process execution, compare scheduling strategies, and inspect energy and utilization trends from one dashboard.
+        </p>
+      </div>
+      <div id="serverStatus" class="server-badge pending">Waiting for API</div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Workload</p>
+            <h2>Processes</h2>
+          </div>
+          <div class="table-actions">
+            <button class="secondary-btn" type="button" onclick="loadDemoData()">Load Demo</button>
+            <button class="secondary-btn" type="button" onclick="addRow()">Add Process</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table id="processTable" class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Arrival</th>
+                <th>Burst</th>
+                <th>Deadline</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Configuration</p>
+            <h2>Simulation Setup</h2>
+          </div>
+        </div>
+
+        <div class="config-grid">
+          <label class="field">
+            <span>Cores</span>
+            <input type="number" id="cores" value="2" min="1" />
+          </label>
+
+          <label class="field">
+            <span>Algorithm</span>
+            <select id="algorithm">
+              <option value="EATS">EATS</option>
+              <option value="FCFS">FCFS</option>
+              <option value="RR">Round Robin</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Mode</span>
+            <select id="mode">
+              <option value="power">Power Saver</option>
+              <option value="performance">Performance</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="actions-row">
+          <button id="runButton" class="run-btn" type="button" onclick="runSimulation()">Run Simulation</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Results</p>
+            <h2>Scheduler Insights</h2>
+          </div>
+        </div>
+
+        <div id="statusMessage" class="status-banner info">
+          Demo processes loaded. Run the simulator when you are ready.
+        </div>
+
+        <div id="summaryCards" class="summary-grid"></div>
+        <div id="metrics" class="metrics-panel"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Timeline</p>
+            <h2>Execution Gantt View</h2>
+          </div>
+        </div>
+        <div id="gantt" class="gantt-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Process Metrics</p>
+            <h2>Per-Process Breakdown</h2>
+          </div>
+        </div>
+        <div id="processMetrics"></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Charts</p>
+            <h2>Performance Visualizations</h2>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <article class="chart-card">
+            <h3>Energy vs Time</h3>
+            <canvas id="energyChart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <h3>Algorithm Comparison</h3>
+            <canvas id="comparisonChart"></canvas>
+          </article>
+
+          <article class="chart-card">
+            <h3>CPU Utilization</h3>
+            <canvas id="utilizationChart"></canvas>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

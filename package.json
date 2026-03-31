@@ -1,0 +1,7 @@
+{
+  "name": "energy-aware-scheduler",
+  "private": true,
+  "scripts": {
+    "start": "node server/server.js"
+  }
+}
