@@ -1,4 +1,11 @@
 
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
 # Node modules
 node_modules/
 
@@ -35,3 +42,6 @@ Thumbs.db
 
 # Coverage
 coverage/
+
+# Local server leftovers
+server/node_modules/

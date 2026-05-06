@@ -1,9 +1,0 @@
-{
-  "version": 2,
-  "rewrites": [
-    { "source": "/", "destination": "/client/index.html" },
-    { "source": "/app.js", "destination": "/client/app.js" },
-    { "source": "/style.css", "destination": "/client/style.css" },
-    { "source": "/charts/(.*)", "destination": "/client/charts/$1" }
-  ]
-}

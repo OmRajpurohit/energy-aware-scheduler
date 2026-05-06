@@ -10,12 +10,12 @@ const DEFAULT_ROWS = [
   { arrival: 4, burst: 7, deadline: 14 }
 ];
 
-const BAR_COLORS = ["#0f766e", "#2563eb", "#d97706", "#7c3aed", "#dc2626", "#0891b2"];
-const TIMELINE_STEP_MS = 700;
+const PROCESS_COLORS = ["#14b8a6", "#2563eb", "#f59e0b", "#8b5cf6", "#ec4899", "#0ea5e9", "#84cc16"];
+const MIN_PLAYBACK_MS = 4500;
+const MAX_PLAYBACK_MS = 16000;
 
 let processCount = 0;
 let latestSimulationResult = null;
-let activeTimelineTimer = null;
 let timelineState = createTimelineState();
 
 function addRow(process = {}) {
@@ -59,9 +59,7 @@ function loadDemoData() {
 }
 
 function getProcesses() {
-  const rows = document.querySelectorAll("#processTable tbody tr");
-
-  return Array.from(rows).map((row, index) => {
+  return Array.from(document.querySelectorAll("#processTable tbody tr")).map((row, index) => {
     const inputs = row.querySelectorAll("input");
 
     return {
@@ -74,7 +72,7 @@ function getProcesses() {
 }
 
 function validateProcesses(tasks) {
-  if (tasks.length === 0) {
+  if (!tasks.length) {
     return "Add at least one process before running the simulation.";
   }
 
@@ -103,17 +101,19 @@ async function runSimulation() {
     return;
   }
 
-  const button = document.getElementById("runButton");
+  const runButton = document.getElementById("runButton");
   const data = {
     tasks,
     cores: Number.parseInt(document.getElementById("cores").value, 10),
     algorithm: document.getElementById("algorithm").value,
-    mode: document.getElementById("mode").value
+    mode: document.getElementById("mode").value,
+    quantum: Number.parseInt(document.getElementById("quantum").value, 10),
+    comparisonMode: isComparisonModeEnabled()
   };
 
-  button.disabled = true;
-  button.textContent = "Running...";
-  setStatus("Connecting to the scheduler API and computing the result...", "info");
+  runButton.disabled = true;
+  runButton.textContent = "Running...";
+  setStatus("Connecting to the Flask scheduler API and computing the result...", "info");
   setServerBadge("Checking API...");
 
   try {
@@ -121,7 +121,8 @@ async function runSimulation() {
 
     latestSimulationResult = result;
     renderSummary(result);
-    renderGantt(result.gantt);
+    renderInsights(result.insights);
+    renderGantt(result.timeline);
     renderProcessMetrics(result.processes);
     renderCharts(result);
 
@@ -136,8 +137,8 @@ async function runSimulation() {
     setStatus(error.message, "error");
     console.error(error);
   } finally {
-    button.disabled = false;
-    button.textContent = "Run Simulation";
+    runButton.disabled = false;
+    runButton.textContent = "Run Simulation";
   }
 }
 
@@ -148,9 +149,7 @@ async function requestSchedule(data) {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
       });
 
@@ -168,7 +167,7 @@ async function requestSchedule(data) {
   }
 
   throw new Error(
-    "The backend server is not reachable on port 5000. Start it with `cd server && npm start`, then rerun the simulation."
+    "The Flask backend is not reachable on port 5000. Start it with `python app.py`, then rerun the simulation."
   );
 }
 
@@ -199,41 +198,24 @@ async function checkApiHealth() {
   setServerBadge("API offline", false);
 }
 
-function renderCharts(result) {
-  const liveChartsEnabled = document.getElementById("liveChartsToggle").checked;
-
-  applyChartSelection();
-
-  if (!liveChartsEnabled) {
-    updateChartStatus("Live chart updates are paused. Turn the toggle on to refresh the selected chart.", "paused");
-    return;
-  }
-
-  renderEnergyChart(result);
-  renderComparisonChart(result);
-  renderUtilizationChart(result);
-  updateChartStatus(getChartSelectionMessage(), "active");
-}
-
 function renderSummary(result) {
-  const summary = result.summary;
-  const metrics = result.metrics;
+  const { summary, metrics, request } = result;
 
   document.getElementById("summaryCards").innerHTML = `
     <article class="metric-card accent-energy">
       <span class="metric-label">Total Energy</span>
       <strong class="metric-value">${summary.totalEnergy}</strong>
-      <span class="metric-note">Computed from frequency and run time</span>
+      <span class="metric-note">${formatSigned(summary.energyDelta)} vs ${summary.baselineEnergy} baseline</span>
+    </article>
+    <article class="metric-card accent-baseline">
+      <span class="metric-label">DVFS Savings</span>
+      <strong class="metric-value">${summary.energySavingsRate}%</strong>
+      <span class="metric-note">Modes use 0.8, 1.2, and 2.0 GHz bands</span>
     </article>
     <article class="metric-card accent-time">
       <span class="metric-label">Average Waiting</span>
       <strong class="metric-value">${metrics.averageWaitingTime}</strong>
-      <span class="metric-note">Average queue delay per process</span>
-    </article>
-    <article class="metric-card accent-utilization">
-      <span class="metric-label">CPU Utilization</span>
-      <strong class="metric-value">${metrics.cpuUtilization}%</strong>
-      <span class="metric-note">${metrics.throughput} processes per time unit</span>
+      <span class="metric-note">Average turnaround is ${metrics.averageTurnaroundTime}</span>
     </article>
     <article class="metric-card accent-deadline">
       <span class="metric-label">Deadline Success</span>
@@ -244,51 +226,132 @@ function renderSummary(result) {
 
   document.getElementById("metrics").innerHTML = `
     <div class="details-grid">
-      <div><span>Algorithm</span><strong>${summary.algorithmLabel}</strong></div>
-      <div><span>Mode</span><strong>${capitalize(summary.mode)}</strong></div>
+      <div><span>Primary Algorithm</span><strong>${summary.algorithmLabel}</strong></div>
+      <div><span>DVFS Mode</span><strong>${formatMode(summary.mode)}</strong></div>
       <div><span>Cores</span><strong>${summary.cores}</strong></div>
+      <div><span>Round Robin Quantum</span><strong>${request.quantum}</strong></div>
       <div><span>Total Time</span><strong>${summary.totalTime}</strong></div>
-      <div><span>Idle Time</span><strong>${summary.idleTime}</strong></div>
-      <div><span>Average Turnaround</span><strong>${metrics.averageTurnaroundTime}</strong></div>
+      <div><span>Idle Capacity</span><strong>${summary.idleTime}</strong></div>
+      <div><span>CPU Utilization</span><strong>${metrics.cpuUtilization}%</strong></div>
+      <div><span>Throughput</span><strong>${metrics.throughput}</strong></div>
       <div><span>Average Response</span><strong>${metrics.averageResponseTime}</strong></div>
       <div><span>Average Frequency</span><strong>${summary.averageFrequency} GHz</strong></div>
+      <div><span>Comparison Mode</span><strong>${request.comparisonMode ? "Enabled" : "Disabled"}</strong></div>
+      <div><span>Frequency Levels</span><strong>${request.frequencyLevels.join(" / ")} GHz</strong></div>
     </div>
   `;
 }
 
-function renderGantt(gantt) {
+function renderInsights(insights = {}) {
+  const deadlineMisses = insights.deadlineMisses || [];
+  const bottlenecks = insights.bottlenecks || [];
+  const suggestions = insights.suggestions || [];
+
+  if (!deadlineMisses.length && !bottlenecks.length && !suggestions.length) {
+    document.getElementById("insightsPanel").innerHTML = `
+      <div class="insight-card">
+        <h3>Healthy Schedule</h3>
+        <p>No deadline misses or major queue bottlenecks were detected for the current run.</p>
+      </div>
+    `;
+    return;
+  }
+
+  document.getElementById("insightsPanel").innerHTML = `
+    <div class="insight-grid">
+      <article class="insight-card">
+        <h3>Deadline Misses</h3>
+        ${deadlineMisses.length ? `<ul>${deadlineMisses.map(item => `<li>${item.process} missed ${item.deadline} and finished at ${item.completionTime} because ${item.reason}</li>`).join("")}</ul>` : "<p>No deadline misses detected.</p>"}
+      </article>
+      <article class="insight-card">
+        <h3>Bottlenecks</h3>
+        ${bottlenecks.length ? `<ul>${bottlenecks.map(item => `<li>${item.message}</li>`).join("")}</ul>` : "<p>No queue hotspots crossed the alert threshold.</p>"}
+      </article>
+      <article class="insight-card">
+        <h3>Suggestions</h3>
+        ${suggestions.length ? `<ul>${suggestions.map(item => `<li>${item}</li>`).join("")}</ul>` : "<p>The current configuration is already well aligned with the workload.</p>"}
+      </article>
+    </div>
+  `;
+}
+
+function renderGantt(timeline) {
   const container = document.getElementById("gantt");
-  const clock = document.getElementById("timelineClock");
-  const legend = document.getElementById("timelineLegend");
 
   resetTimelineAnimation();
 
-  if (!gantt.length) {
-    container.innerHTML = `<p class="empty-state">No execution timeline available yet.</p>`;
-    clock.textContent = "Time 0";
-    legend.textContent = "Animated playback highlights one execution slice at a time.";
+  if (!timeline?.lanes?.length || timeline.totalTime <= 0) {
+    container.innerHTML = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
     timelineState = createTimelineState();
+    updateTimelineBanner("Animated playback highlights each core independently as the simulation clock advances.", 0, 0);
     syncTimelineControls();
     return;
   }
 
-  const totalTime = gantt[gantt.length - 1].end || 1;
+  const totalTime = timeline.totalTime;
 
-  container.innerHTML = gantt.map((segment, index) => {
-    const width = Math.max((segment.duration / totalTime) * 100, 8);
-    const color = BAR_COLORS[index % BAR_COLORS.length];
+  container.innerHTML = `
+    <div class="gantt-board">
+      <div class="gantt-axis">
+        ${buildTimeTicks(totalTime)}
+      </div>
+      <div class="gantt-lanes" id="ganttLaneStack">
+        <div id="timelineCursor" class="timeline-cursor"></div>
+        ${timeline.lanes.map((lane, laneIndex) => `
+          <div class="gantt-lane">
+            <div class="gantt-lane-label">${lane.label}</div>
+            <div class="gantt-track">
+              ${lane.segments.map(segment => {
+                const left = (segment.start / totalTime) * 100;
+                const width = Math.max((segment.duration / totalTime) * 100, 2.4);
+                const accent = getProcessColor(segment.process, laneIndex);
+                const base = segment.deadlineMet ? "#16a34a" : "#dc2626";
+                const tooltip = [
+                  `${segment.process} on ${segment.coreLabel}`,
+                  `Start: ${segment.start}`,
+                  `End: ${segment.end}`,
+                  `Energy: ${segment.energy}`,
+                  `Frequency: ${segment.frequency} GHz`
+                ].join("\n");
 
-    return `
-      <article class="gantt-bar pending" data-index="${index}" style="width:${width}%; background:${color}">
-        <span class="gantt-title">${segment.process}</span>
-        <span class="gantt-time">${segment.start} to ${segment.end}</span>
-        <span class="gantt-meta">${segment.energy} energy | ${segment.utilization}% load</span>
-        <span class="gantt-progress"></span>
-      </article>
-    `;
-  }).join("");
+                return `
+                  <article
+                    class="gantt-segment pending ${segment.deadlineMet ? "deadline-met" : "deadline-missed"}"
+                    data-start="${segment.start}"
+                    data-end="${segment.end}"
+                    data-process="${segment.process}"
+                    data-core="${segment.coreLabel}"
+                    style="left:${left}%; width:${width}%; --segment-progress:0%; background:linear-gradient(135deg, ${base}, ${accent});"
+                    title="${tooltip}"
+                  >
+                    <div class="gantt-fill"></div>
+                    <div class="gantt-content">
+                      <span class="gantt-title">${segment.process}</span>
+                      <span class="gantt-time">${segment.start} - ${segment.end}</span>
+                      <span class="gantt-meta">${segment.frequency} GHz | ${segment.energy} energy</span>
+                    </div>
+                  </article>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
 
-  loadTimeline(gantt);
+  loadTimeline(timeline);
+}
+
+function buildTimeTicks(totalTime) {
+  const steps = Math.max(4, Math.min(8, Math.ceil(totalTime)));
+  const values = Array.from({ length: steps + 1 }, (_, index) => roundNumber((totalTime / steps) * index));
+
+  return values.map(value => `
+    <span class="gantt-tick" style="left:${totalTime > 0 ? (value / totalTime) * 100 : 0}%">
+      <em>${value}</em>
+    </span>
+  `).join("");
 }
 
 function renderProcessMetrics(processes) {
@@ -298,19 +361,6 @@ function renderProcessMetrics(processes) {
     container.innerHTML = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
     return;
   }
-
-  const rows = processes.map(process => `
-    <tr>
-      <td>${process.id}</td>
-      <td>${process.arrival}</td>
-      <td>${process.burst}</td>
-      <td>${process.deadline ?? "-"}</td>
-      <td>${process.waitingTime}</td>
-      <td>${process.turnaroundTime}</td>
-      <td>${process.responseTime}</td>
-      <td>${process.deadlineMet ? "Met" : "Missed"}</td>
-    </tr>
-  `).join("");
 
   container.innerHTML = `
     <table class="process-metrics-table">
@@ -323,21 +373,60 @@ function renderProcessMetrics(processes) {
           <th>Waiting</th>
           <th>Turnaround</th>
           <th>Response</th>
+          <th>Frequency</th>
+          <th>Energy</th>
+          <th>Baseline Delta</th>
           <th>Status</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>
+        ${processes.map(process => `
+          <tr>
+            <td>${process.id}</td>
+            <td>${process.arrival}</td>
+            <td>${process.burst}</td>
+            <td>${process.deadline ?? "-"}</td>
+            <td>${process.waitingTime}</td>
+            <td>${process.turnaroundTime}</td>
+            <td>${process.responseTime}</td>
+            <td>${process.frequencyProfile}</td>
+            <td>${process.totalEnergy}</td>
+            <td>${formatSigned(process.energyDelta)}</td>
+            <td><span class="deadline-badge ${process.deadlineMet ? "met" : "missed"}">${process.deadlineMet ? "Met" : "Missed"}</span></td>
+          </tr>
+        `).join("")}
+      </tbody>
     </table>
   `;
+}
+
+function renderCharts(result) {
+  const liveChartsEnabled = document.getElementById("liveChartsToggle").checked;
+
+  applyChartSelection();
+
+  if (!liveChartsEnabled) {
+    updateChartStatus("Live chart updates are paused. Turn the toggle on to refresh the selected chart.", "paused");
+    return;
+  }
+
+  renderEnergyChart(result);
+  renderUtilizationChart(result);
+
+  if (isComparisonModeEnabled()) {
+    renderComparisonChart(result);
+  }
+
+  updateChartStatus(getChartSelectionMessage(), "active");
 }
 
 function clearResults() {
   document.getElementById("summaryCards").innerHTML = "";
   document.getElementById("metrics").innerHTML = "";
+  document.getElementById("insightsPanel").innerHTML = "";
   document.getElementById("gantt").innerHTML = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
   document.getElementById("processMetrics").innerHTML = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
-  document.getElementById("timelineClock").textContent = "Time 0";
-  document.getElementById("timelineLegend").textContent = "Animated playback highlights one execution slice at a time.";
+  updateTimelineBanner("Animated playback highlights each core independently as the simulation clock advances.", 0, 0);
   timelineState = createTimelineState();
   resetTimelineAnimation();
   syncTimelineControls();
@@ -364,26 +453,38 @@ function setServerBadge(message, isOnline) {
 
 function applyChartSelection() {
   const selectedChart = document.getElementById("chartViewSelect").value;
-  const cards = document.querySelectorAll(".chart-card");
+  const comparisonEnabled = isComparisonModeEnabled();
 
-  cards.forEach(card => {
-    const isVisible = selectedChart === "all" || card.dataset.chart === selectedChart;
+  document.querySelectorAll(".chart-card").forEach(card => {
+    let isVisible = selectedChart === "all" || card.dataset.chart === selectedChart;
+
+    if (card.dataset.chart === "comparison" && !comparisonEnabled) {
+      isVisible = false;
+    }
+
     card.classList.toggle("hidden", !isVisible);
   });
 }
 
 function getChartSelectionMessage() {
   const selectedChart = document.getElementById("chartViewSelect").value;
+  const comparisonEnabled = isComparisonModeEnabled();
+
+  if (selectedChart === "comparison" && !comparisonEnabled) {
+    return "Turn Comparison Mode on to populate the side-by-side algorithm charts.";
+  }
 
   switch (selectedChart) {
     case "energy":
       return "Showing the Energy vs Time chart with live updates enabled.";
     case "comparison":
-      return "Showing the Algorithm Comparison chart with live updates enabled.";
+      return "Showing side-by-side algorithm comparison charts with live updates enabled.";
     case "utilization":
       return "Showing the CPU Utilization chart with live updates enabled.";
     default:
-      return "Showing all charts with live updates enabled.";
+      return comparisonEnabled
+        ? "Showing all charts with live updates enabled."
+        : "Showing core charts. Enable Comparison Mode to benchmark all algorithms side by side.";
   }
 }
 
@@ -410,9 +511,7 @@ function handleChartSelection() {
 }
 
 function handleLiveToggle() {
-  const liveChartsEnabled = document.getElementById("liveChartsToggle").checked;
-
-  if (!liveChartsEnabled) {
+  if (!document.getElementById("liveChartsToggle").checked) {
     updateChartStatus("Live chart updates are paused. Existing results stay visible until the next live refresh.", "paused");
     return;
   }
@@ -425,184 +524,235 @@ function handleLiveToggle() {
   updateChartStatus(getChartSelectionMessage().replace("Showing", "Ready to show"), "active");
 }
 
-function getTimelineBars() {
-  return Array.from(document.querySelectorAll(".gantt-bar"));
+function handleComparisonToggle() {
+  applyChartSelection();
+
+  if (latestSimulationResult && document.getElementById("liveChartsToggle").checked) {
+    renderCharts(latestSimulationResult);
+    return;
+  }
+
+  updateChartStatus(getChartSelectionMessage(), isComparisonModeEnabled() ? "active" : "idle");
 }
 
-function loadTimeline(gantt) {
+function loadTimeline(timeline) {
   timelineState = {
-    gantt,
-    currentIndex: 0,
-    paused: false,
-    completed: false
+    timeline,
+    currentTime: 0,
+    isPlaying: false,
+    completed: false,
+    animationFrame: null,
+    playbackDurationMs: getPlaybackDuration(timeline.totalTime)
   };
 
-  updateTimelineBanner("Playback started. Processes will appear in execution order.", gantt[0].start);
-  syncTimelineControls();
-  scheduleNextTimelineStep();
-}
-
-function runTimelineStep() {
-  const { gantt, currentIndex } = timelineState;
-  const bars = getTimelineBars();
-
-  bars.forEach((bar, index) => {
-    bar.classList.toggle("completed", index < currentIndex);
-    bar.classList.toggle("active", index === currentIndex);
-    bar.classList.toggle("pending", index > currentIndex);
-  });
-
-  if (currentIndex >= gantt.length) {
-    finishTimelinePlayback();
-    return;
-  }
-
-  const segment = gantt[currentIndex];
-  updateTimelineBanner(
-    `${segment.process} is executing from ${segment.start} to ${segment.end} with ${segment.utilization}% CPU load.`,
-    segment.end
-  );
-
-  timelineState.currentIndex += 1;
-  syncTimelineControls();
-  scheduleNextTimelineStep();
-}
-
-function scheduleNextTimelineStep() {
-  resetTimelineAnimation();
-
-  if (timelineState.paused || timelineState.completed || timelineState.gantt.length === 0) {
-    syncTimelineControls();
-    return;
-  }
-
-  if (timelineState.currentIndex >= timelineState.gantt.length) {
-    finishTimelinePlayback();
-    return;
-  }
-
-  activeTimelineTimer = window.setTimeout(runTimelineStep, TIMELINE_STEP_MS);
-}
-
-function finishTimelinePlayback() {
-  const finishedSegment = timelineState.gantt[timelineState.gantt.length - 1];
-  timelineState.completed = true;
-  timelineState.paused = false;
-  resetTimelineAnimation();
   updateTimelineVisuals();
-  updateTimelineBanner(
-    `Execution complete. ${timelineState.gantt.length} slices finished across the visible timeline.`,
-    finishedSegment.end
-  );
+  updateTimelineBanner("Playback ready. Press play to animate the schedule clock across all cores.", 0, timeline.totalTime);
   syncTimelineControls();
-}
-
-function updateTimelineVisuals() {
-  const clock = document.getElementById("timelineClock");
-  const legend = document.getElementById("timelineLegend");
-
-  if (timelineState.gantt.length === 0) {
-    clock.textContent = "Time 0";
-    legend.textContent = "Animated playback highlights one execution slice at a time.";
-    return;
-  }
-
-  const bars = getTimelineBars();
-  const currentIndex = timelineState.currentIndex;
-
-  bars.forEach((bar, index) => {
-    bar.classList.toggle("completed", index < currentIndex || timelineState.completed);
-    bar.classList.toggle("active", !timelineState.completed && index === currentIndex);
-    bar.classList.toggle("pending", !timelineState.completed && index > currentIndex);
-  });
-}
-
-function updateTimelineBanner(message, time) {
-  document.getElementById("timelineClock").textContent = `Time ${time}`;
-  document.getElementById("timelineLegend").textContent = message;
+  playTimeline();
 }
 
 function playTimeline() {
-  if (timelineState.gantt.length === 0) {
-    updateTimelineBanner("Run a simulation first to unlock timeline playback controls.", 0);
+  if (!timelineState.timeline) {
+    updateTimelineBanner("Run a simulation first to unlock timeline playback controls.", 0, 0);
+    return;
+  }
+
+  if (timelineState.isPlaying) {
     return;
   }
 
   if (timelineState.completed) {
-    replayTimeline();
-    return;
+    timelineState.currentTime = 0;
+    timelineState.completed = false;
   }
 
-  timelineState.paused = false;
+  const totalTime = timelineState.timeline.totalTime || 0;
+
+  timelineState.isPlaying = true;
+  timelineState.animationStartedAt = performance.now() - ((timelineState.currentTime / Math.max(totalTime, 1)) * timelineState.playbackDurationMs);
   syncTimelineControls();
-  scheduleNextTimelineStep();
+  timelineState.animationFrame = window.requestAnimationFrame(stepTimeline);
 }
 
 function pauseTimeline() {
-  if (timelineState.gantt.length === 0 || timelineState.completed) {
+  if (!timelineState.timeline || !timelineState.isPlaying) {
     return;
   }
 
-  timelineState.paused = true;
+  timelineState.isPlaying = false;
   resetTimelineAnimation();
   updateTimelineVisuals();
-  updateTimelineBanner("Timeline paused. Press play to continue from the current execution slice.", getCurrentTimelineTime());
+  updateTimelineBanner("Timeline paused. Press play to continue from the current simulation clock.", timelineState.currentTime, timelineState.timeline.totalTime);
   syncTimelineControls();
 }
 
 function replayTimeline() {
-  if (timelineState.gantt.length === 0) {
-    updateTimelineBanner("Run a simulation first to replay the CPU execution timeline.", 0);
+  if (!timelineState.timeline) {
+    updateTimelineBanner("Run a simulation first to replay the CPU execution timeline.", 0, 0);
     return;
   }
 
   resetTimelineAnimation();
-  timelineState.currentIndex = 0;
-  timelineState.paused = false;
+  timelineState.currentTime = 0;
   timelineState.completed = false;
+  timelineState.isPlaying = false;
   updateTimelineVisuals();
-  updateTimelineBanner("Replay started. Processes will appear again from the beginning.", timelineState.gantt[0].start);
+  updateTimelineBanner("Replay ready. Press play to restart from t = 0.", 0, timelineState.timeline.totalTime);
   syncTimelineControls();
-  scheduleNextTimelineStep();
+  playTimeline();
 }
 
-function getCurrentTimelineTime() {
-  if (timelineState.currentIndex === 0) {
-    return timelineState.gantt[0]?.start ?? 0;
+function stepTimeline(timestamp) {
+  if (!timelineState.timeline || !timelineState.isPlaying) {
+    return;
   }
 
-  return timelineState.gantt[Math.min(timelineState.currentIndex - 1, timelineState.gantt.length - 1)]?.end ?? 0;
+  const totalTime = timelineState.timeline.totalTime || 0;
+  const elapsed = timestamp - timelineState.animationStartedAt;
+  const progress = Math.min(elapsed / timelineState.playbackDurationMs, 1);
+
+  timelineState.currentTime = roundNumber(progress * totalTime);
+  updateTimelineVisuals();
+
+  if (progress >= 1) {
+    finishTimelinePlayback();
+    return;
+  }
+
+  timelineState.animationFrame = window.requestAnimationFrame(stepTimeline);
+}
+
+function finishTimelinePlayback() {
+  timelineState.isPlaying = false;
+  timelineState.completed = true;
+  timelineState.currentTime = timelineState.timeline?.totalTime ?? 0;
+  resetTimelineAnimation();
+  updateTimelineVisuals();
+  updateTimelineBanner("Execution complete. All visible lanes finished their scheduled work.", timelineState.currentTime, timelineState.timeline?.totalTime ?? 0);
+  syncTimelineControls();
+}
+
+function updateTimelineVisuals() {
+  const totalTime = timelineState.timeline?.totalTime ?? 0;
+  const currentTime = timelineState.currentTime;
+  const segments = document.querySelectorAll(".gantt-segment");
+  const cursor = document.getElementById("timelineCursor");
+  const activeSegments = [];
+
+  if (cursor) {
+    cursor.style.left = `${totalTime > 0 ? Math.min((currentTime / totalTime) * 100, 100) : 0}%`;
+  }
+
+  segments.forEach(segment => {
+    const start = Number.parseFloat(segment.dataset.start);
+    const end = Number.parseFloat(segment.dataset.end);
+    const progress = currentTime <= start
+      ? 0
+      : currentTime >= end
+        ? 1
+        : (currentTime - start) / Math.max(end - start, 0.01);
+
+    segment.style.setProperty("--segment-progress", `${progress * 100}%`);
+    segment.classList.toggle("pending", progress === 0);
+    segment.classList.toggle("active", progress > 0 && progress < 1);
+    segment.classList.toggle("completed", progress >= 1);
+
+    if (progress > 0 && progress < 1) {
+      activeSegments.push(`${segment.dataset.core}: ${segment.dataset.process}`);
+    }
+  });
+
+  if (timelineState.completed) {
+    updateTimelineBanner("Execution complete. All visible lanes finished their scheduled work.", currentTime, totalTime);
+    return;
+  }
+
+  if (!timelineState.timeline) {
+    updateTimelineBanner("Animated playback highlights each core independently as the simulation clock advances.", 0, 0);
+    return;
+  }
+
+  if (!activeSegments.length && currentTime === 0) {
+    updateTimelineBanner("Playback ready. Press play to animate the schedule clock across all cores.", currentTime, totalTime);
+    return;
+  }
+
+  if (activeSegments.length) {
+    updateTimelineBanner(activeSegments.join(" | "), currentTime, totalTime);
+    return;
+  }
+
+  updateTimelineBanner("No process is executing at this instant. The simulator is between arrivals or after a completion.", currentTime, totalTime);
+}
+
+function updateTimelineBanner(message, currentTime, totalTime) {
+  document.getElementById("timelineClock").textContent = `t = ${roundNumber(currentTime)}${totalTime ? ` / ${roundNumber(totalTime)}` : ""}`;
+  document.getElementById("timelineLegend").textContent = message;
 }
 
 function syncTimelineControls() {
-  const hasTimeline = timelineState.gantt.length > 0;
-  const playButton = document.getElementById("timelinePlayButton");
-  const pauseButton = document.getElementById("timelinePauseButton");
-  const replayButton = document.getElementById("timelineReplayButton");
+  const hasTimeline = Boolean(timelineState.timeline);
 
-  playButton.disabled = !hasTimeline || (!timelineState.paused && !timelineState.completed);
-  pauseButton.disabled = !hasTimeline || timelineState.paused || timelineState.completed;
-  replayButton.disabled = !hasTimeline;
+  document.getElementById("timelinePlayButton").disabled = !hasTimeline || timelineState.isPlaying;
+  document.getElementById("timelinePauseButton").disabled = !hasTimeline || !timelineState.isPlaying;
+  document.getElementById("timelineReplayButton").disabled = !hasTimeline;
 }
 
 function resetTimelineAnimation() {
-  if (activeTimelineTimer) {
-    window.clearTimeout(activeTimelineTimer);
-    activeTimelineTimer = null;
+  if (timelineState.animationFrame) {
+    window.cancelAnimationFrame(timelineState.animationFrame);
+    timelineState.animationFrame = null;
   }
 }
 
 function createTimelineState() {
   return {
-    gantt: [],
-    currentIndex: 0,
-    paused: false,
-    completed: false
+    timeline: null,
+    currentTime: 0,
+    isPlaying: false,
+    completed: false,
+    animationFrame: null,
+    playbackDurationMs: MIN_PLAYBACK_MS
   };
 }
 
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+function getPlaybackDuration(totalTime) {
+  if (!totalTime) {
+    return MIN_PLAYBACK_MS;
+  }
+
+  return Math.min(MAX_PLAYBACK_MS, Math.max(MIN_PLAYBACK_MS, totalTime * 650));
+}
+
+function isComparisonModeEnabled() {
+  return document.getElementById("comparisonModeToggle").checked;
+}
+
+function formatMode(mode) {
+  if (mode === "power") {
+    return "Power Saver";
+  }
+  if (mode === "performance") {
+    return "Performance";
+  }
+  return "Balanced";
+}
+
+function formatSigned(value) {
+  if (value > 0) {
+    return `+${value}`;
+  }
+  return `${value}`;
+}
+
+function getProcessColor(processId, fallbackIndex = 0) {
+  const numericPart = Number.parseInt(String(processId).replace(/\D/g, ""), 10);
+  const index = Number.isNaN(numericPart) ? fallbackIndex : numericPart - 1;
+  return PROCESS_COLORS[((index % PROCESS_COLORS.length) + PROCESS_COLORS.length) % PROCESS_COLORS.length];
+}
+
+function roundNumber(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
 function initialize() {
@@ -615,10 +765,11 @@ function initialize() {
 
 window.addRow = addRow;
 window.deleteRow = deleteRow;
-window.runSimulation = runSimulation;
 window.loadDemoData = loadDemoData;
+window.runSimulation = runSimulation;
 window.handleChartSelection = handleChartSelection;
 window.handleLiveToggle = handleLiveToggle;
+window.handleComparisonToggle = handleComparisonToggle;
 window.playTimeline = playTimeline;
 window.pauseTimeline = pauseTimeline;
 window.replayTimeline = replayTimeline;

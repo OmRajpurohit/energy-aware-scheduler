@@ -16,7 +16,7 @@ export function renderEnergyChart(data) {
   energyChartInstance = new window.Chart(canvas, {
     type: "line",
     data: {
-      labels: timeline.map(point => point.label),
+      labels: timeline.map(point => `t=${point.time}`),
       datasets: [
         {
           label: "Cumulative Energy",
@@ -32,9 +32,23 @@ export function renderEnergyChart(data) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: {
+        duration: 500,
+        easing: "easeOutQuart"
+      },
       plugins: {
         legend: {
           display: true
+        },
+        tooltip: {
+          callbacks: {
+            title(items) {
+              return timeline[items[0].dataIndex]?.label || "";
+            },
+            label(context) {
+              return `Cumulative Energy: ${context.parsed.y}`;
+            }
+          }
         }
       },
       scales: {
