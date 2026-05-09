@@ -200,6 +200,11 @@ async function checkApiHealth() {
 
 function renderSummary(result) {
   const { summary, metrics, request } = result;
+  const gameStats = buildGameStats(result);
+
+  renderMissionControl(result, gameStats);
+  renderAchievementRack(gameStats);
+  renderPerformancePulse(result, gameStats);
 
   document.getElementById("summaryCards").innerHTML = `
     <article class="metric-card accent-energy">
@@ -238,6 +243,138 @@ function renderSummary(result) {
       <div><span>Average Frequency</span><strong>${summary.averageFrequency} GHz</strong></div>
       <div><span>Comparison Mode</span><strong>${request.comparisonMode ? "Enabled" : "Disabled"}</strong></div>
       <div><span>Frequency Levels</span><strong>${request.frequencyLevels.join(" / ")} GHz</strong></div>
+    </div>
+  `;
+}
+
+function renderMissionControl(result, gameStats) {
+  const { summary, metrics } = result;
+
+  document.getElementById("missionControl").innerHTML = `
+    <article class="control-card score-card">
+      <div class="score-headline">
+        <span class="mini-kicker">Command Score</span>
+        <strong>${gameStats.points}</strong>
+      </div>
+      <div class="level-row">
+        <div>
+          <span class="mini-kicker">Level ${gameStats.level}</span>
+          <p>${gameStats.title}</p>
+        </div>
+        <div class="streak-pill">
+          <span>Streak</span>
+          <strong>${gameStats.streak}x</strong>
+        </div>
+      </div>
+      <div class="xp-track">
+        <span class="xp-fill" style="width:${gameStats.levelProgress}%"></span>
+      </div>
+      <div class="score-meta">
+        <span>${summary.algorithmLabel}</span>
+        <span>${metrics.deadlineSuccessRate}% success</span>
+        <span>${summary.energySavingsRate}% energy saved</span>
+      </div>
+    </article>
+    <article class="control-card gauge-card">
+      ${renderGauge("CPU Load", metrics.cpuUtilization, `${metrics.cpuUtilization}%`, "blue")}
+      ${renderGauge("Queue Flow", clampValue(100 - (metrics.averageWaitingTime * 12)), `${metrics.averageWaitingTime} wt`, "purple")}
+      ${renderGauge("Turnaround", clampValue(100 - (metrics.averageTurnaroundTime * 8)), `${metrics.averageTurnaroundTime} tt`, "green")}
+    </article>
+    <article class="control-card mission-log">
+      <div class="log-row">
+        <span class="mini-kicker">Live Mode</span>
+        <strong>${formatMode(summary.mode)}</strong>
+      </div>
+      <div class="log-row">
+        <span class="mini-kicker">Core Mesh</span>
+        <strong>${summary.cores} Active Cores</strong>
+      </div>
+      <div class="log-row">
+        <span class="mini-kicker">Playback</span>
+        <strong>${result.timeline?.totalTime ?? 0} Time Units</strong>
+      </div>
+      <div class="log-row">
+        <span class="mini-kicker">Tactical Hint</span>
+        <strong>${gameStats.focus}</strong>
+      </div>
+    </article>
+  `;
+}
+
+function renderGauge(label, value, metric, tone) {
+  return `
+    <div class="gauge-shell ${tone}">
+      <div class="gauge-ring" style="--gauge-value:${clampValue(value)}%">
+        <div class="gauge-core">
+          <strong>${metric}</strong>
+          <span>${label}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAchievementRack(gameStats) {
+  document.getElementById("achievementRack").innerHTML = gameStats.badges.map(badge => `
+    <article class="achievement-badge ${badge.tone}">
+      <span class="badge-icon">${badge.icon}</span>
+      <div>
+        <strong>${badge.label}</strong>
+        <p>${badge.description}</p>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderPerformancePulse(result, gameStats) {
+  const { summary, metrics } = result;
+  const tracks = [
+    {
+      label: "CPU Usage",
+      value: clampValue(metrics.cpuUtilization),
+      tone: "blue",
+      meta: `${metrics.cpuUtilization}% active`
+    },
+    {
+      label: "Waiting Pressure",
+      value: clampValue(100 - (metrics.averageWaitingTime * 12)),
+      tone: "purple",
+      meta: `${metrics.averageWaitingTime} avg wait`
+    },
+    {
+      label: "Turnaround Tempo",
+      value: clampValue(100 - (metrics.averageTurnaroundTime * 8)),
+      tone: "green",
+      meta: `${metrics.averageTurnaroundTime} avg turnaround`
+    },
+    {
+      label: "Energy Efficiency",
+      value: clampValue(summary.energySavingsRate),
+      tone: "cyan",
+      meta: `${summary.energySavingsRate}% saved`
+    }
+  ];
+
+  document.getElementById("performancePulse").innerHTML = `
+    <div class="pulse-header">
+      <div>
+        <p class="mini-kicker">Performance Pulse</p>
+        <h3>Gamified Efficiency Tracks</h3>
+      </div>
+      <div class="pulse-score">${gameStats.grade}</div>
+    </div>
+    <div class="pulse-grid">
+      ${tracks.map(track => `
+        <div class="pulse-track-card">
+          <div class="pulse-track-top">
+            <span>${track.label}</span>
+            <strong>${track.meta}</strong>
+          </div>
+          <div class="pulse-track">
+            <span class="pulse-track-fill ${track.tone}" style="width:${track.value}%"></span>
+          </div>
+        </div>
+      `).join("")}
     </div>
   `;
 }
@@ -421,7 +558,10 @@ function renderCharts(result) {
 }
 
 function clearResults() {
+  document.getElementById("missionControl").innerHTML = buildMissionControlIdle();
+  document.getElementById("achievementRack").innerHTML = buildAchievementRackIdle();
   document.getElementById("summaryCards").innerHTML = "";
+  document.getElementById("performancePulse").innerHTML = buildPerformancePulseIdle();
   document.getElementById("metrics").innerHTML = "";
   document.getElementById("insightsPanel").innerHTML = "";
   document.getElementById("gantt").innerHTML = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
@@ -753,6 +893,177 @@ function getProcessColor(processId, fallbackIndex = 0) {
 
 function roundNumber(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function buildGameStats(result) {
+  const { summary, metrics, processes } = result;
+  const efficiencyScore = clampValue(
+    (metrics.deadlineSuccessRate * 0.36) +
+    (summary.energySavingsRate * 0.26) +
+    (clampValue(100 - (metrics.averageWaitingTime * 12)) * 0.18) +
+    (clampValue(metrics.cpuUtilization) * 0.2)
+  );
+  const points = Math.round(
+    (efficiencyScore * 18) +
+    (summary.cores * 55) +
+    (metrics.throughput * 180) -
+    (metrics.missedDeadlines * 45)
+  );
+  const level = Math.max(1, Math.floor(points / 320) + 1);
+  const levelProgress = clampValue(((points % 320) / 320) * 100);
+  const streak = metrics.missedDeadlines === 0
+    ? Math.max(3, Math.round((metrics.deadlineSuccessRate / 10) + (summary.energySavingsRate / 20)))
+    : Math.max(1, Math.round(metrics.deadlineSuccessRate / 25));
+  const grade = efficiencyScore >= 92 ? "S+" : efficiencyScore >= 84 ? "A" : efficiencyScore >= 72 ? "B" : efficiencyScore >= 58 ? "C" : "D";
+  const badges = [];
+
+  if (metrics.deadlineSuccessRate === 100) {
+    badges.push({
+      icon: "◎",
+      label: "Deadline Guardian",
+      description: "Every process hit its deadline target.",
+      tone: "green"
+    });
+  }
+
+  if (summary.energySavingsRate >= 30) {
+    badges.push({
+      icon: "◈",
+      label: "Energy Hunter",
+      description: "DVFS achieved a strong savings profile.",
+      tone: "blue"
+    });
+  }
+
+  if (metrics.cpuUtilization >= 75) {
+    badges.push({
+      icon: "✦",
+      label: "Core Commander",
+      description: "The cores stayed meaningfully engaged.",
+      tone: "purple"
+    });
+  }
+
+  if (processes.every(process => process.deadlineMet && process.energyDelta <= 0)) {
+    badges.push({
+      icon: "⬢",
+      label: "Perfect Sync",
+      description: "Met deadlines while staying below baseline energy.",
+      tone: "cyan"
+    });
+  }
+
+  if (!badges.length) {
+    badges.push({
+      icon: "◌",
+      label: "Warmup Run",
+      description: "Tune the workload to unlock performance badges.",
+      tone: "neutral"
+    });
+  }
+
+  const titles = [
+    "Queue Cadet",
+    "Latency Ranger",
+    "Deadline Tactician",
+    "Core Strategist",
+    "Neon Scheduler",
+    "Quantum Architect"
+  ];
+
+  return {
+    points,
+    level,
+    levelProgress,
+    streak,
+    grade,
+    badges,
+    title: titles[Math.min(level - 1, titles.length - 1)],
+    focus: metrics.missedDeadlines > 0
+      ? "Reduce misses with faster dispatch."
+      : summary.energySavingsRate < 15
+        ? "Push harder on DVFS efficiency."
+        : "Maintain this execution rhythm."
+  };
+}
+
+function buildMissionControlIdle() {
+  return `
+    <article class="control-card score-card idle-card">
+      <div class="score-headline">
+        <span class="mini-kicker">Command Score</span>
+        <strong>0000</strong>
+      </div>
+      <div class="level-row">
+        <div>
+          <span class="mini-kicker">Level 1</span>
+          <p>Queue Cadet</p>
+        </div>
+        <div class="streak-pill">
+          <span>Streak</span>
+          <strong>0x</strong>
+        </div>
+      </div>
+      <div class="xp-track"><span class="xp-fill" style="width:18%"></span></div>
+      <div class="score-meta">
+        <span>Awaiting run</span>
+        <span>Telemetry offline</span>
+        <span>Rewards locked</span>
+      </div>
+    </article>
+    <article class="control-card gauge-card">
+      ${renderGauge("CPU Load", 18, "--", "blue")}
+      ${renderGauge("Queue Flow", 24, "--", "purple")}
+      ${renderGauge("Turnaround", 30, "--", "green")}
+    </article>
+    <article class="control-card mission-log idle-card">
+      <div class="log-row"><span class="mini-kicker">Live Mode</span><strong>Balanced</strong></div>
+      <div class="log-row"><span class="mini-kicker">Core Mesh</span><strong>Awaiting input</strong></div>
+      <div class="log-row"><span class="mini-kicker">Playback</span><strong>Standby</strong></div>
+      <div class="log-row"><span class="mini-kicker">Tactical Hint</span><strong>Launch a run to score your scheduler.</strong></div>
+    </article>
+  `;
+}
+
+function buildAchievementRackIdle() {
+  return `
+    <article class="achievement-badge neutral">
+      <span class="badge-icon">◌</span>
+      <div>
+        <strong>Achievement Bay</strong>
+        <p>Run the simulator to unlock scheduler badges.</p>
+      </div>
+    </article>
+  `;
+}
+
+function buildPerformancePulseIdle() {
+  return `
+    <div class="pulse-header">
+      <div>
+        <p class="mini-kicker">Performance Pulse</p>
+        <h3>Gamified Efficiency Tracks</h3>
+      </div>
+      <div class="pulse-score">--</div>
+    </div>
+    <div class="pulse-grid">
+      ${["CPU Usage", "Waiting Pressure", "Turnaround Tempo", "Energy Efficiency"].map((label, index) => `
+        <div class="pulse-track-card">
+          <div class="pulse-track-top">
+            <span>${label}</span>
+            <strong>Awaiting run</strong>
+          </div>
+          <div class="pulse-track">
+            <span class="pulse-track-fill ${["blue", "purple", "green", "cyan"][index]}" style="width:${20 + (index * 8)}%"></span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function clampValue(value, min = 0, max = 100) {
+  return Math.min(max, Math.max(min, roundNumber(value)));
 }
 
 function initialize() {
