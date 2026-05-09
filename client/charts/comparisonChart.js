@@ -1,3 +1,10 @@
+import {
+  buildHorizontalGradient,
+  buildSharedOptions,
+  createBarValuePlugin,
+  createChartFramePlugin
+} from "./theme.js";
+
 const chartInstances = new Map();
 
 const METRIC_CONFIG = [
@@ -44,6 +51,8 @@ export function renderComparisonChart(data) {
 
     const points = metrics[config.metricKey] || [];
     const existingChart = chartInstances.get(config.canvasId);
+    const framePlugin = createChartFramePlugin();
+    const labelPlugin = createBarValuePlugin();
 
     if (existingChart) {
       existingChart.destroy();
@@ -57,64 +66,71 @@ export function renderComparisonChart(data) {
           {
             label: config.label,
             data: points.map(point => point.value),
-            backgroundColor: points.map(() => `${config.color}cc`),
+            backgroundColor(context) {
+              const { chart } = context;
+              const area = chart.chartArea;
+              if (!area) {
+                return `${config.color}cc`;
+              }
+
+              return buildHorizontalGradient(chart.ctx, area, `${config.color}ff`, `${config.color}40`);
+            },
             borderColor: points.map(() => config.color),
             borderWidth: 1,
-            borderRadius: 10,
-            barThickness: 28
+            borderRadius: 14,
+            borderSkipped: false,
+            barThickness: 24,
+            categoryPercentage: 0.7,
+            barPercentage: 0.82
           }
         ]
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {
-          duration: 550,
-          easing: "easeOutQuart"
+      options: buildSharedOptions({
+        indexAxis: "y",
+        layout: {
+          padding: {
+            top: 8,
+            right: 48,
+            bottom: 8,
+            left: 10
+          }
         },
         plugins: {
           legend: {
             display: false
           },
           tooltip: {
-            backgroundColor: "rgba(7, 12, 24, 0.96)",
-            titleColor: "#f5fbff",
-            bodyColor: "#c9dbff",
-            borderColor: "rgba(73, 166, 255, 0.28)",
-            borderWidth: 1,
             callbacks: {
               label(context) {
-                return `${config.label}: ${context.parsed.y}`;
+                return `${config.label}: ${context.parsed.x}`;
               }
             }
           }
         },
         scales: {
           x: {
-            ticks: {
-              color: "#91a8d3"
-            },
-            grid: {
-              display: false
-            }
-          },
-          y: {
             beginAtZero: true,
             suggestedMax: config.max,
             ticks: {
-              color: "#91a8d3"
+              color: "#91a8d3",
+              precision: 0
             },
             grid: {
-              color: "rgba(145, 168, 211, 0.1)"
+              color: "rgba(145, 168, 211, 0.08)"
+            }
+          },
+          y: {
+            ticks: {
+              color: "#dbe7ff"
             },
             title: {
               display: true,
-              text: config.label,
-              color: "#b9ccf1"
+              text: config.label
             }
           }
         }
-      }
+      }),
+      plugins: [framePlugin, labelPlugin]
     }));
   });
 }

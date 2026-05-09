@@ -1,3 +1,9 @@
+import {
+  buildSharedOptions,
+  buildVerticalGradient,
+  createChartFramePlugin
+} from "./theme.js";
+
 let energyChartInstance = null;
 
 export function renderEnergyChart(data) {
@@ -13,45 +19,66 @@ export function renderEnergyChart(data) {
 
   const timeline = data.charts?.energyTimeline || [];
 
+  const framePlugin = createChartFramePlugin();
+
   energyChartInstance = new window.Chart(canvas, {
-    type: "line",
+    type: "bar",
     data: {
       labels: timeline.map(point => `t=${point.time}`),
       datasets: [
         {
+          type: "bar",
+          label: "Per Slice Energy",
+          data: timeline.map(point => point.segmentEnergy ?? 0),
+          backgroundColor(context) {
+            const { chart } = context;
+            const area = chart.chartArea;
+            if (!area) {
+              return "rgba(24, 215, 255, 0.3)";
+            }
+
+            return buildVerticalGradient(chart.ctx, area, "rgba(24, 215, 255, 0.84)", "rgba(73, 166, 255, 0.28)");
+          },
+          borderRadius: 14,
+          borderSkipped: false,
+          order: 2
+        },
+        {
+          type: "line",
           label: "Cumulative Energy",
           data: timeline.map(point => point.value),
-          borderColor: "#49a6ff",
-          backgroundColor: "rgba(73, 166, 255, 0.18)",
-          pointBackgroundColor: "#7fd8ff",
+          borderColor: "#7fd8ff",
+          backgroundColor(context) {
+            const { chart } = context;
+            const area = chart.chartArea;
+            if (!area) {
+              return "rgba(73, 166, 255, 0.18)";
+            }
+
+            return buildVerticalGradient(chart.ctx, area, "rgba(73, 166, 255, 0.28)", "rgba(73, 166, 255, 0.02)");
+          },
+          pointBackgroundColor: "#c1f3ff",
           pointBorderColor: "#09111f",
           pointRadius: 4,
           pointHoverRadius: 6,
+          pointHoverBorderWidth: 2,
           fill: true,
-          tension: 0.35
+          tension: 0.36,
+          borderWidth: 3,
+          order: 1
         }
       ]
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: {
-        duration: 500,
-        easing: "easeOutQuart"
+    options: buildSharedOptions({
+      interaction: {
+        mode: "index",
+        intersect: false
       },
       plugins: {
         legend: {
-          display: true,
-          labels: {
-            color: "#dce9ff"
-          }
+          display: true
         },
         tooltip: {
-          backgroundColor: "rgba(7, 12, 24, 0.96)",
-          titleColor: "#f5fbff",
-          bodyColor: "#c9dbff",
-          borderColor: "rgba(73, 166, 255, 0.28)",
-          borderWidth: 1,
           callbacks: {
             title(items) {
               return timeline[items[0].dataIndex]?.label || "";
@@ -65,32 +92,19 @@ export function renderEnergyChart(data) {
       scales: {
         y: {
           beginAtZero: true,
-          ticks: {
-            color: "#91a8d3"
-          },
-          grid: {
-            color: "rgba(145, 168, 211, 0.1)"
-          },
           title: {
             display: true,
-            text: "Energy Units",
-            color: "#b9ccf1"
+            text: "Energy Units"
           }
         },
         x: {
-          ticks: {
-            color: "#91a8d3"
-          },
-          grid: {
-            color: "rgba(145, 168, 211, 0.08)"
-          },
           title: {
             display: true,
-            text: "Execution Segment",
-            color: "#b9ccf1"
+            text: "Execution Segment"
           }
         }
       }
-    }
+    }),
+    plugins: [framePlugin]
   });
 }
