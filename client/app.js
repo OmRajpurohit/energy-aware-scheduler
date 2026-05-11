@@ -18,6 +18,12 @@ let processCount = 0;
 let latestSimulationResult = null;
 let timelineState = createTimelineState();
 
+/* ─── TRASH ICON SVG ─── */
+function trashIcon() {
+  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+}
+
+/* ─── PROCESS TABLE ─── */
 function addRow(process = {}) {
   const table = document.querySelector("#processTable tbody");
   const row = document.createElement("tr");
@@ -27,7 +33,7 @@ function addRow(process = {}) {
     <td><input type="number" min="0" value="${process.arrival ?? 0}" /></td>
     <td><input type="number" min="1" value="${process.burst ?? 1}" /></td>
     <td><input type="number" min="0" value="${process.deadline ?? 0}" /></td>
-    <td><button class="icon-btn" type="button" onclick="deleteRow(this)">Remove</button></td>
+    <td><button class="icon-btn" type="button" onclick="deleteRow(this)" aria-label="Remove process">${trashIcon()}</button></td>
   `;
 
   table.appendChild(row);
@@ -41,11 +47,9 @@ function deleteRow(button) {
 
 function refreshProcessLabels() {
   const rows = document.querySelectorAll("#processTable tbody tr");
-
   rows.forEach((row, index) => {
     row.querySelector(".process-id").textContent = `P${index + 1}`;
   });
-
   processCount = rows.length;
 }
 
@@ -53,84 +57,67 @@ function loadDemoData() {
   const table = document.querySelector("#processTable tbody");
   table.innerHTML = "";
   processCount = 0;
-
   DEFAULT_ROWS.forEach(addRow);
-  setStatus("Demo processes loaded. Run the simulator when you are ready.", "info");
+  setStatus("Sample data loaded. Press Run Simulation when ready.", "info");
 }
 
 function getProcesses() {
   return Array.from(document.querySelectorAll("#processTable tbody tr")).map((row, index) => {
     const inputs = row.querySelectorAll("input");
-
     return {
       id: `P${index + 1}`,
       arrival: Number.parseInt(inputs[0].value, 10),
-      burst: Number.parseInt(inputs[1].value, 10),
+      burst:   Number.parseInt(inputs[1].value, 10),
       deadline: Number.parseInt(inputs[2].value, 10)
     };
   });
 }
 
 function validateProcesses(tasks) {
-  if (!tasks.length) {
-    return "Add at least one process before running the simulation.";
-  }
-
-  const invalidTask = tasks.find(task =>
-    Number.isNaN(task.arrival) ||
-    Number.isNaN(task.burst) ||
-    Number.isNaN(task.deadline) ||
-    task.arrival < 0 ||
-    task.burst < 1 ||
-    task.deadline < 0
+  if (!tasks.length) return "Add at least one process before running the simulation.";
+  const invalid = tasks.find(t =>
+    Number.isNaN(t.arrival) || Number.isNaN(t.burst) || Number.isNaN(t.deadline) ||
+    t.arrival < 0 || t.burst < 1 || t.deadline < 0
   );
-
-  if (invalidTask) {
-    return "Use valid numeric values: arrival >= 0, burst >= 1, deadline >= 0.";
-  }
-
+  if (invalid) return "Use valid numeric values: arrival ≥ 0, burst ≥ 1, deadline ≥ 0.";
   return null;
 }
 
+/* ─── SIMULATION ─── */
 async function runSimulation() {
   const tasks = getProcesses();
-  const validationError = validateProcesses(tasks);
-
-  if (validationError) {
-    setStatus(validationError, "error");
-    return;
-  }
+  const err = validateProcesses(tasks);
+  if (err) { setStatus(err, "error"); return; }
 
   const runButton = document.getElementById("runButton");
   const data = {
     tasks,
-    cores: Number.parseInt(document.getElementById("cores").value, 10),
-    algorithm: document.getElementById("algorithm").value,
-    mode: document.getElementById("mode").value,
-    quantum: Number.parseInt(document.getElementById("quantum").value, 10),
+    cores:          Number.parseInt(document.getElementById("cores").value, 10),
+    algorithm:      document.getElementById("algorithm").value,
+    mode:           document.getElementById("mode").value,
+    quantum:        Number.parseInt(document.getElementById("quantum").value, 10),
     comparisonMode: isComparisonModeEnabled()
   };
 
   runButton.disabled = true;
-  runButton.textContent = "Running...";
-  setStatus("Connecting to the Flask scheduler API and computing the result...", "info");
-  setServerBadge("Checking API...");
+  runButton.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" opacity=".25"/><path d="M12 2a10 10 0 0 1 10 10h-2a8 8 0 0 0-8-8V2z"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></path></svg> Running…`;
+  setStatus("Computing schedule…", "info");
+  setServerBadge("Checking API…");
 
   try {
     const result = await requestSchedule(data);
-
     latestSimulationResult = result;
     renderSummary(result);
     renderInsights(result.insights);
     renderGantt(result.timeline);
     renderProcessMetrics(result.processes);
     renderCharts(result);
-
     setServerBadge("API connected", true);
     setStatus(
-      `${result.request.algorithmLabel} completed for ${result.request.taskCount} processes in ${result.summary.totalTime} time units.`,
+      `${result.request.algorithmLabel} completed — ${result.request.taskCount} processes, ${result.summary.totalTime} time units.`,
       "success"
     );
+    activateTab("summary");
   } catch (error) {
     clearResults();
     setServerBadge("API offline", false);
@@ -138,13 +125,12 @@ async function runSimulation() {
     console.error(error);
   } finally {
     runButton.disabled = false;
-    runButton.textContent = "Run Simulation";
+    runButton.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Simulation`;
   }
 }
 
 async function requestSchedule(data) {
   const endpoints = getApiEndpoints("/api/schedule");
-
   for (const endpoint of endpoints) {
     try {
       const response = await fetch(endpoint, {
@@ -152,104 +138,98 @@ async function requestSchedule(data) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
       });
-
       if (!response.ok) {
         const payload = await tryReadJson(response);
         throw new Error(payload.error || `Request failed with status ${response.status}.`);
       }
-
       return response.json();
     } catch (error) {
-      if (!(error instanceof TypeError)) {
-        throw error;
-      }
+      if (!(error instanceof TypeError)) throw error;
     }
   }
-
-  throw new Error(
-    "The Flask backend is not reachable on port 5000. Start it with `python app.py`, then rerun the simulation."
-  );
+  throw new Error("The Flask backend is not reachable on port 5000. Start it with `python app.py`, then re-run.");
 }
 
 async function tryReadJson(response) {
-  try {
-    return await response.json();
-  } catch (error) {
-    return {};
-  }
+  try { return await response.json(); } catch { return {}; }
 }
 
 async function checkApiHealth() {
   const endpoints = getApiEndpoints("/api/health");
-
   for (const endpoint of endpoints) {
     try {
       const response = await fetch(endpoint);
-
-      if (response.ok) {
-        setServerBadge("API connected", true);
-        return;
-      }
-    } catch (error) {
-      // Try the next endpoint.
-    }
+      if (response.ok) { setServerBadge("API connected", true); return; }
+    } catch { /* try next */ }
   }
-
   setServerBadge("API offline", false);
 }
 
+/* ─── RENDER: SUMMARY ─── */
 function renderSummary(result) {
   const { summary, metrics, request } = result;
   const gameStats = buildGameStats(result);
 
-  renderMissionControl(result, gameStats);
-  renderAchievementRack(gameStats);
-  renderPerformancePulse(result, gameStats);
+  /* 3 key metrics always shown */
+  const scoreHtml = isGamificationEnabled()
+    ? `<article class="metric-card accent-score">
+         <span class="metric-label">Simulation Score</span>
+         <strong class="metric-value">${gameStats.points}</strong>
+         <p class="metric-note">Level ${gameStats.level} — ${gameStats.title}</p>
+       </article>`
+    : "";
 
   document.getElementById("summaryCards").innerHTML = `
+    ${scoreHtml}
     <article class="metric-card accent-energy">
-      <span class="metric-label">Total Energy</span>
-      <strong class="metric-value">${summary.totalEnergy}</strong>
-      <span class="metric-note">${formatSigned(summary.energyDelta)} vs ${summary.baselineEnergy} baseline</span>
-    </article>
-    <article class="metric-card accent-baseline">
-      <span class="metric-label">DVFS Savings</span>
-      <strong class="metric-value">${summary.energySavingsRate}%</strong>
-      <span class="metric-note">Modes use 0.8, 1.2, and 2.0 GHz bands</span>
+      <span class="metric-label">CPU Utilization</span>
+      <strong class="metric-value">${metrics.cpuUtilization}%</strong>
+      <p class="metric-note">${summary.idleTime} idle time units</p>
     </article>
     <article class="metric-card accent-time">
-      <span class="metric-label">Average Waiting</span>
-      <strong class="metric-value">${metrics.averageWaitingTime}</strong>
-      <span class="metric-note">Average turnaround is ${metrics.averageTurnaroundTime}</span>
+      <span class="metric-label">Avg Turnaround</span>
+      <strong class="metric-value">${metrics.averageTurnaroundTime}</strong>
+      <p class="metric-note">Avg wait: ${metrics.averageWaitingTime}</p>
     </article>
     <article class="metric-card accent-deadline">
       <span class="metric-label">Deadline Success</span>
       <strong class="metric-value">${metrics.deadlineSuccessRate}%</strong>
-      <span class="metric-note">${metrics.missedDeadlines} missed deadlines</span>
+      <p class="metric-note">${metrics.missedDeadlines} missed</p>
     </article>
   `;
 
+  /* Gamification block */
+  const gamBlock = document.getElementById("gamificationBlock");
+  if (isGamificationEnabled()) {
+    gamBlock.style.display = "";
+    renderMissionControl(result, gameStats);
+    renderAchievementRack(gameStats);
+    renderPerformancePulse(result, gameStats);
+  } else {
+    gamBlock.style.display = "none";
+  }
+
+  /* Detail metrics grid */
   document.getElementById("metrics").innerHTML = `
     <div class="details-grid">
-      <div><span>Primary Algorithm</span><strong>${summary.algorithmLabel}</strong></div>
+      <div><span>Algorithm</span><strong>${summary.algorithmLabel}</strong></div>
       <div><span>DVFS Mode</span><strong>${formatMode(summary.mode)}</strong></div>
       <div><span>Cores</span><strong>${summary.cores}</strong></div>
-      <div><span>Round Robin Quantum</span><strong>${request.quantum}</strong></div>
+      <div><span>RR Quantum</span><strong>${request.quantum}</strong></div>
       <div><span>Total Time</span><strong>${summary.totalTime}</strong></div>
-      <div><span>Idle Capacity</span><strong>${summary.idleTime}</strong></div>
-      <div><span>CPU Utilization</span><strong>${metrics.cpuUtilization}%</strong></div>
+      <div><span>Total Energy</span><strong>${summary.totalEnergy}</strong></div>
+      <div><span>DVFS Savings</span><strong>${summary.energySavingsRate}%</strong></div>
       <div><span>Throughput</span><strong>${metrics.throughput}</strong></div>
-      <div><span>Average Response</span><strong>${metrics.averageResponseTime}</strong></div>
-      <div><span>Average Frequency</span><strong>${summary.averageFrequency} GHz</strong></div>
-      <div><span>Comparison Mode</span><strong>${request.comparisonMode ? "Enabled" : "Disabled"}</strong></div>
-      <div><span>Frequency Levels</span><strong>${request.frequencyLevels.join(" / ")} GHz</strong></div>
+      <div><span>Avg Response</span><strong>${metrics.averageResponseTime}</strong></div>
+      <div><span>Avg Frequency</span><strong>${summary.averageFrequency} GHz</strong></div>
+      <div><span>Baseline Energy</span><strong>${summary.baselineEnergy}</strong></div>
+      <div><span>Comparison</span><strong>${request.comparisonMode ? "Enabled" : "Off"}</strong></div>
     </div>
   `;
 }
 
 function renderMissionControl(result, gameStats) {
   const { summary, metrics } = result;
-
   document.getElementById("missionControl").innerHTML = `
     <article class="control-card score-card">
       <div class="score-headline">
@@ -272,7 +252,7 @@ function renderMissionControl(result, gameStats) {
       <div class="score-meta">
         <span>${summary.algorithmLabel}</span>
         <span>${metrics.deadlineSuccessRate}% success</span>
-        <span>${summary.energySavingsRate}% energy saved</span>
+        <span>${summary.energySavingsRate}% saved</span>
       </div>
     </article>
     <article class="control-card gauge-card">
@@ -281,22 +261,10 @@ function renderMissionControl(result, gameStats) {
       ${renderGauge("Turnaround", clampValue(100 - (metrics.averageTurnaroundTime * 8)), `${metrics.averageTurnaroundTime} tt`, "green")}
     </article>
     <article class="control-card mission-log">
-      <div class="log-row">
-        <span class="mini-kicker">Live Mode</span>
-        <strong>${formatMode(summary.mode)}</strong>
-      </div>
-      <div class="log-row">
-        <span class="mini-kicker">Core Mesh</span>
-        <strong>${summary.cores} Active Cores</strong>
-      </div>
-      <div class="log-row">
-        <span class="mini-kicker">Playback</span>
-        <strong>${result.timeline?.totalTime ?? 0} Time Units</strong>
-      </div>
-      <div class="log-row">
-        <span class="mini-kicker">Tactical Hint</span>
-        <strong>${gameStats.focus}</strong>
-      </div>
+      <div class="log-row"><span class="mini-kicker">Live Mode</span><strong>${formatMode(summary.mode)}</strong></div>
+      <div class="log-row"><span class="mini-kicker">Core Mesh</span><strong>${summary.cores} Active Cores</strong></div>
+      <div class="log-row"><span class="mini-kicker">Playback</span><strong>${result.timeline?.totalTime ?? 0} Time Units</strong></div>
+      <div class="log-row"><span class="mini-kicker">Focus</span><strong>${gameStats.focus}</strong></div>
     </article>
   `;
 }
@@ -329,49 +297,26 @@ function renderAchievementRack(gameStats) {
 function renderPerformancePulse(result, gameStats) {
   const { summary, metrics } = result;
   const tracks = [
-    {
-      label: "CPU Usage",
-      value: clampValue(metrics.cpuUtilization),
-      tone: "blue",
-      meta: `${metrics.cpuUtilization}% active`
-    },
-    {
-      label: "Waiting Pressure",
-      value: clampValue(100 - (metrics.averageWaitingTime * 12)),
-      tone: "purple",
-      meta: `${metrics.averageWaitingTime} avg wait`
-    },
-    {
-      label: "Turnaround Tempo",
-      value: clampValue(100 - (metrics.averageTurnaroundTime * 8)),
-      tone: "green",
-      meta: `${metrics.averageTurnaroundTime} avg turnaround`
-    },
-    {
-      label: "Energy Efficiency",
-      value: clampValue(summary.energySavingsRate),
-      tone: "cyan",
-      meta: `${summary.energySavingsRate}% saved`
-    }
+    { label: "CPU Usage",        value: clampValue(metrics.cpuUtilization),                              tone: "blue",   meta: `${metrics.cpuUtilization}% active` },
+    { label: "Waiting Pressure", value: clampValue(100 - (metrics.averageWaitingTime * 12)),             tone: "purple", meta: `${metrics.averageWaitingTime} avg wait` },
+    { label: "Turnaround Tempo", value: clampValue(100 - (metrics.averageTurnaroundTime * 8)),           tone: "green",  meta: `${metrics.averageTurnaroundTime} avg turnaround` },
+    { label: "Energy Efficiency",value: clampValue(summary.energySavingsRate),                           tone: "cyan",   meta: `${summary.energySavingsRate}% saved` }
   ];
 
   document.getElementById("performancePulse").innerHTML = `
     <div class="pulse-header">
       <div>
         <p class="mini-kicker">Performance Pulse</p>
-        <h3>Gamified Efficiency Tracks</h3>
+        <h3>Efficiency Tracks</h3>
       </div>
       <div class="pulse-score">${gameStats.grade}</div>
     </div>
     <div class="pulse-grid">
-      ${tracks.map(track => `
+      ${tracks.map(t => `
         <div class="pulse-track-card">
-          <div class="pulse-track-top">
-            <span>${track.label}</span>
-            <strong>${track.meta}</strong>
-          </div>
+          <div class="pulse-track-top"><span>${t.label}</span><strong>${t.meta}</strong></div>
           <div class="pulse-track">
-            <span class="pulse-track-fill ${track.tone}" style="width:${track.value}%"></span>
+            <span class="pulse-track-fill ${t.tone}" style="width:${t.value}%"></span>
           </div>
         </div>
       `).join("")}
@@ -379,16 +324,17 @@ function renderPerformancePulse(result, gameStats) {
   `;
 }
 
+/* ─── RENDER: INSIGHTS ─── */
 function renderInsights(insights = {}) {
   const deadlineMisses = insights.deadlineMisses || [];
-  const bottlenecks = insights.bottlenecks || [];
-  const suggestions = insights.suggestions || [];
+  const bottlenecks    = insights.bottlenecks || [];
+  const suggestions    = insights.suggestions || [];
 
   if (!deadlineMisses.length && !bottlenecks.length && !suggestions.length) {
     document.getElementById("insightsPanel").innerHTML = `
       <div class="insight-card">
         <h3>Healthy Schedule</h3>
-        <p>No deadline misses or major queue bottlenecks were detected for the current run.</p>
+        <p>No deadline misses or major bottlenecks detected.</p>
       </div>
     `;
     return;
@@ -398,23 +344,23 @@ function renderInsights(insights = {}) {
     <div class="insight-grid">
       <article class="insight-card">
         <h3>Deadline Misses</h3>
-        ${deadlineMisses.length ? `<ul>${deadlineMisses.map(item => `<li>${item.process} missed ${item.deadline} and finished at ${item.completionTime} because ${item.reason}</li>`).join("")}</ul>` : "<p>No deadline misses detected.</p>"}
+        ${deadlineMisses.length ? `<ul>${deadlineMisses.map(i => `<li>${i.process} missed ${i.deadline}, finished at ${i.completionTime} — ${i.reason}</li>`).join("")}</ul>` : "<p>None detected.</p>"}
       </article>
       <article class="insight-card">
         <h3>Bottlenecks</h3>
-        ${bottlenecks.length ? `<ul>${bottlenecks.map(item => `<li>${item.message}</li>`).join("")}</ul>` : "<p>No queue hotspots crossed the alert threshold.</p>"}
+        ${bottlenecks.length ? `<ul>${bottlenecks.map(i => `<li>${i.message}</li>`).join("")}</ul>` : "<p>No queue hotspots detected.</p>"}
       </article>
       <article class="insight-card">
         <h3>Suggestions</h3>
-        ${suggestions.length ? `<ul>${suggestions.map(item => `<li>${item}</li>`).join("")}</ul>` : "<p>The current configuration is already well aligned with the workload.</p>"}
+        ${suggestions.length ? `<ul>${suggestions.map(i => `<li>${i}</li>`).join("")}</ul>` : "<p>Configuration is already well aligned.</p>"}
       </article>
     </div>
   `;
 }
 
+/* ─── RENDER: GANTT ─── */
 function renderGantt(timeline) {
   const container = document.getElementById("gantt");
-
   resetTimelineAnimation();
 
   if (!timeline?.lanes?.length || timeline.totalTime <= 0) {
@@ -426,46 +372,36 @@ function renderGantt(timeline) {
   }
 
   const totalTime = timeline.totalTime;
-
   container.innerHTML = `
     <div class="gantt-board">
-      <div class="gantt-axis">
-        ${buildTimeTicks(totalTime)}
-      </div>
+      <div class="gantt-axis">${buildTimeTicks(totalTime)}</div>
       <div class="gantt-lanes" id="ganttLaneStack">
         <div id="timelineCursor" class="timeline-cursor"></div>
-        ${timeline.lanes.map((lane, laneIndex) => `
+        ${timeline.lanes.map((lane, li) => `
           <div class="gantt-lane">
             <div class="gantt-lane-label">${lane.label}</div>
             <div class="gantt-track">
-              ${lane.segments.map(segment => {
-                const left = (segment.start / totalTime) * 100;
-                const width = Math.max((segment.duration / totalTime) * 100, 2.4);
-                const accent = getProcessColor(segment.process, laneIndex);
-                const base = segment.deadlineMet ? "#16a34a" : "#dc2626";
-                const tooltip = [
-                  `${segment.process} on ${segment.coreLabel}`,
-                  `Start: ${segment.start}`,
-                  `End: ${segment.end}`,
-                  `Energy: ${segment.energy}`,
-                  `Frequency: ${segment.frequency} GHz`
+              ${lane.segments.map(seg => {
+                const left  = (seg.start / totalTime) * 100;
+                const width = Math.max((seg.duration / totalTime) * 100, 2.4);
+                const accent = getProcessColor(seg.process, li);
+                const base   = seg.deadlineMet ? "#16a34a" : "#dc2626";
+                const tip = [
+                  `${seg.process} on ${seg.coreLabel}`,
+                  `Start: ${seg.start}`, `End: ${seg.end}`,
+                  `Energy: ${seg.energy}`, `Freq: ${seg.frequency} GHz`
                 ].join("\n");
-
                 return `
-                  <article
-                    class="gantt-segment pending ${segment.deadlineMet ? "deadline-met" : "deadline-missed"}"
-                    data-start="${segment.start}"
-                    data-end="${segment.end}"
-                    data-process="${segment.process}"
-                    data-core="${segment.coreLabel}"
-                    style="left:${left}%; width:${width}%; --segment-progress:0%; background:linear-gradient(135deg, ${base}, ${accent});"
-                    title="${tooltip}"
-                  >
+                  <article class="gantt-segment pending ${seg.deadlineMet ? "deadline-met" : "deadline-missed"}"
+                    data-start="${seg.start}" data-end="${seg.end}"
+                    data-process="${seg.process}" data-core="${seg.coreLabel}"
+                    style="left:${left}%; width:${width}%; --segment-progress:0%; background:linear-gradient(135deg,${base},${accent});"
+                    title="${tip}">
                     <div class="gantt-fill"></div>
                     <div class="gantt-content">
-                      <span class="gantt-title">${segment.process}</span>
-                      <span class="gantt-time">${segment.start} - ${segment.end}</span>
-                      <span class="gantt-meta">${segment.frequency} GHz | ${segment.energy} energy</span>
+                      <span class="gantt-title">${seg.process}</span>
+                      <span class="gantt-time">${seg.start} – ${seg.end}</span>
+                      <span class="gantt-meta">${seg.frequency} GHz | ${seg.energy}</span>
                     </div>
                   </article>
                 `;
@@ -481,55 +417,45 @@ function renderGantt(timeline) {
 }
 
 function buildTimeTicks(totalTime) {
-  const steps = Math.max(4, Math.min(8, Math.ceil(totalTime)));
-  const values = Array.from({ length: steps + 1 }, (_, index) => roundNumber((totalTime / steps) * index));
-
-  return values.map(value => `
-    <span class="gantt-tick" style="left:${totalTime > 0 ? (value / totalTime) * 100 : 0}%">
-      <em>${value}</em>
+  const steps  = Math.max(4, Math.min(8, Math.ceil(totalTime)));
+  const values = Array.from({ length: steps + 1 }, (_, i) => roundNumber((totalTime / steps) * i));
+  return values.map(v => `
+    <span class="gantt-tick" style="left:${totalTime > 0 ? (v / totalTime) * 100 : 0}%">
+      <em>${v}</em>
     </span>
   `).join("");
 }
 
+/* ─── RENDER: PER-PROCESS ─── */
 function renderProcessMetrics(processes) {
   const container = document.getElementById("processMetrics");
-
   if (!processes.length) {
     container.innerHTML = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
     return;
   }
-
   container.innerHTML = `
     <table class="process-metrics-table">
       <thead>
         <tr>
-          <th>Process</th>
-          <th>Arrival</th>
-          <th>Burst</th>
-          <th>Deadline</th>
-          <th>Waiting</th>
-          <th>Turnaround</th>
-          <th>Response</th>
-          <th>Frequency</th>
-          <th>Energy</th>
-          <th>Baseline Delta</th>
-          <th>Status</th>
+          <th>ID</th><th>Arrival</th><th>Burst</th><th>Deadline</th>
+          <th>Waiting</th><th>Turnaround</th><th>Response</th>
+          <th>Frequency</th><th>Energy</th><th>Δ Baseline</th><th>Status</th>
         </tr>
       </thead>
       <tbody>
-        ${processes.map(process => `
+        ${processes.map(p => `
           <tr>
-            <td>${process.id}</td>
-            <td>${process.arrival}</td>
-            <td>${process.burst}</td>
-            <td>${process.deadline ?? "-"}</td>
-            <td>${process.waitingTime}</td>
-            <td>${process.turnaroundTime}</td>
-            <td>${process.responseTime}</td>
-            <td>${process.frequencyProfile}</td>
-            <td>${process.totalEnergy}</td>
-            <td>${formatSigned(process.energyDelta)}</td>
-            <td><span class="deadline-badge ${process.deadlineMet ? "met" : "missed"}">${process.deadlineMet ? "Met" : "Missed"}</span></td>
+            <td>${p.id}</td>
+            <td>${p.arrival}</td>
+            <td>${p.burst}</td>
+            <td>${p.deadline ?? "—"}</td>
+            <td>${p.waitingTime}</td>
+            <td>${p.turnaroundTime}</td>
+            <td>${p.responseTime}</td>
+            <td>${p.frequencyProfile}</td>
+            <td>${p.totalEnergy}</td>
+            <td>${formatSigned(p.energyDelta)}</td>
+            <td><span class="deadline-badge ${p.deadlineMet ? "met" : "missed"}">${p.deadlineMet ? "Met" : "Missed"}</span></td>
           </tr>
         `).join("")}
       </tbody>
@@ -537,35 +463,31 @@ function renderProcessMetrics(processes) {
   `;
 }
 
+/* ─── RENDER: CHARTS ─── */
 function renderCharts(result) {
-  const liveChartsEnabled = document.getElementById("liveChartsToggle").checked;
-
+  const live = document.getElementById("liveChartsToggle").checked;
   applyChartSelection();
-
-  if (!liveChartsEnabled) {
-    updateChartStatus("Live chart updates are paused. Turn the toggle on to refresh the selected chart.", "paused");
-    return;
-  }
-
+  if (!live) { updateChartStatus("Live updates paused. Toggle to refresh.", "paused"); return; }
   renderEnergyChart(result);
   renderUtilizationChart(result);
-
-  if (isComparisonModeEnabled()) {
-    renderComparisonChart(result);
-  }
-
+  if (isComparisonModeEnabled()) renderComparisonChart(result);
   updateChartStatus(getChartSelectionMessage(), "active");
 }
 
 function clearResults() {
-  document.getElementById("missionControl").innerHTML = buildMissionControlIdle();
+  document.getElementById("missionControl").innerHTML  = buildMissionControlIdle();
   document.getElementById("achievementRack").innerHTML = buildAchievementRackIdle();
-  document.getElementById("summaryCards").innerHTML = "";
-  document.getElementById("performancePulse").innerHTML = buildPerformancePulseIdle();
-  document.getElementById("metrics").innerHTML = "";
-  document.getElementById("insightsPanel").innerHTML = "";
-  document.getElementById("gantt").innerHTML = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
-  document.getElementById("processMetrics").innerHTML = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
+  document.getElementById("summaryCards").innerHTML    = "";
+  document.getElementById("performancePulse").innerHTML= buildPerformancePulseIdle();
+  document.getElementById("metrics").innerHTML         = "";
+  document.getElementById("insightsPanel").innerHTML   = "";
+  document.getElementById("gantt").innerHTML           = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
+  document.getElementById("processMetrics").innerHTML  = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
+
+  // Respect gamification toggle
+  const gamBlock = document.getElementById("gamificationBlock");
+  if (gamBlock) gamBlock.style.display = isGamificationEnabled() ? "" : "none";
+
   updateTimelineBanner("Animated playback highlights each core independently as the simulation clock advances.", 0, 0);
   timelineState = createTimelineState();
   resetTimelineAnimation();
@@ -573,6 +495,59 @@ function clearResults() {
   updateChartStatus("Run a simulation to populate the selected chart view.", "idle");
 }
 
+/* ─── TABS ─── */
+function activateTab(tabName) {
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    const active = btn.dataset.tab === tabName;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+    btn.tabIndex = active ? 0 : -1;
+  });
+  document.querySelectorAll(".tab-panel").forEach(panel => {
+    panel.classList.toggle("active", panel.id === `tab-${tabName}`);
+  });
+}
+
+function initTabs() {
+  const buttons = Array.from(document.querySelectorAll(".tab-btn"));
+  buttons.forEach((btn, i) => {
+    btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    btn.addEventListener("keydown", e => {
+      let next = null;
+      if (e.key === "ArrowRight") next = buttons[(i + 1) % buttons.length];
+      if (e.key === "ArrowLeft")  next = buttons[(i - 1 + buttons.length) % buttons.length];
+      if (e.key === "Home") next = buttons[0];
+      if (e.key === "End")  next = buttons[buttons.length - 1];
+      if (next) { next.focus(); activateTab(next.dataset.tab); e.preventDefault(); }
+    });
+    // Set initial tabindex
+    btn.tabIndex = btn.classList.contains("active") ? 0 : -1;
+  });
+}
+
+/* ─── QUANTUM FIELD SHOW/HIDE ─── */
+function updateQuantumVisibility() {
+  const algo = document.getElementById("algorithm").value;
+  const field = document.getElementById("quantumField");
+  if (field) field.classList.toggle("hidden-field", algo !== "RR");
+}
+
+function handleAlgorithmChange() {
+  updateQuantumVisibility();
+}
+
+/* ─── GAMIFICATION TOGGLE ─── */
+function handleGamificationToggle() {
+  if (latestSimulationResult) {
+    renderSummary(latestSimulationResult);
+  }
+}
+
+function isGamificationEnabled() {
+  return document.getElementById("gamificationToggle").checked;
+}
+
+/* ─── API & HELPERS ─── */
 function getApiEndpoints(path) {
   return window.location.port === "5000"
     ? [path]
@@ -580,9 +555,9 @@ function getApiEndpoints(path) {
 }
 
 function setStatus(message, tone = "info") {
-  const element = document.getElementById("statusMessage");
-  element.textContent = message;
-  element.className = `status-banner ${tone}`;
+  const el = document.getElementById("statusMessage");
+  el.textContent = message;
+  el.className = `status-banner ${tone}`;
 }
 
 function setServerBadge(message, isOnline) {
@@ -591,90 +566,66 @@ function setServerBadge(message, isOnline) {
   badge.className = `server-badge ${isOnline === true ? "online" : isOnline === false ? "offline" : "pending"}`;
 }
 
+/* ─── CHART HELPERS ─── */
 function applyChartSelection() {
-  const selectedChart = document.getElementById("chartViewSelect").value;
-  const comparisonEnabled = isComparisonModeEnabled();
-
+  const sel = document.getElementById("chartViewSelect").value;
+  const cmp = isComparisonModeEnabled();
   document.querySelectorAll(".chart-card").forEach(card => {
-    let isVisible = selectedChart === "all" || card.dataset.chart === selectedChart;
-
-    if (card.dataset.chart === "comparison" && !comparisonEnabled) {
-      isVisible = false;
-    }
-
-    card.classList.toggle("hidden", !isVisible);
+    let vis = sel === "all" || card.dataset.chart === sel;
+    if (card.dataset.chart === "comparison" && !cmp) vis = false;
+    card.classList.toggle("hidden", !vis);
   });
 }
 
 function getChartSelectionMessage() {
-  const selectedChart = document.getElementById("chartViewSelect").value;
-  const comparisonEnabled = isComparisonModeEnabled();
-
-  if (selectedChart === "comparison" && !comparisonEnabled) {
-    return "Turn Comparison Mode on to populate the side-by-side algorithm charts.";
-  }
-
-  switch (selectedChart) {
-    case "energy":
-      return "Showing the Energy vs Time chart with live updates enabled.";
-    case "comparison":
-      return "Showing side-by-side algorithm comparison charts with live updates enabled.";
-    case "utilization":
-      return "Showing the CPU Utilization chart with live updates enabled.";
-    default:
-      return comparisonEnabled
-        ? "Showing all charts with live updates enabled."
-        : "Showing core charts. Enable Comparison Mode to benchmark all algorithms side by side.";
-  }
+  const sel = document.getElementById("chartViewSelect").value;
+  const cmp = isComparisonModeEnabled();
+  if (sel === "comparison" && !cmp) return "Enable Comparison Mode to see algorithm charts.";
+  if (sel === "energy")      return "Showing Energy vs Time.";
+  if (sel === "comparison")  return "Showing algorithm comparison charts.";
+  if (sel === "utilization") return "Showing CPU Utilization.";
+  return cmp ? "Showing all charts." : "Showing core charts. Enable Comparison Mode for side-by-side benchmarks.";
 }
 
 function updateChartStatus(message, tone = "active") {
-  const element = document.getElementById("chartLiveStatus");
-  element.textContent = message;
-  element.className = `chart-status ${tone}`;
+  const el = document.getElementById("chartLiveStatus");
+  el.textContent = message;
+  el.className = `chart-status ${tone}`;
 }
 
 function handleChartSelection() {
   applyChartSelection();
-
   if (!document.getElementById("liveChartsToggle").checked) {
-    updateChartStatus("Live chart updates are paused. The selected chart layout is ready when you turn them back on.", "paused");
+    updateChartStatus("Live updates paused. Chart layout is ready.", "paused");
     return;
   }
-
-  if (latestSimulationResult) {
-    renderCharts(latestSimulationResult);
-    return;
-  }
-
-  updateChartStatus("Select a chart now, then run a simulation to view it live.", "idle");
+  if (latestSimulationResult) { renderCharts(latestSimulationResult); return; }
+  updateChartStatus("Select a chart, then run a simulation.", "idle");
 }
 
 function handleLiveToggle() {
   if (!document.getElementById("liveChartsToggle").checked) {
-    updateChartStatus("Live chart updates are paused. Existing results stay visible until the next live refresh.", "paused");
+    updateChartStatus("Live updates paused. Existing results stay visible.", "paused");
     return;
   }
-
-  if (latestSimulationResult) {
-    renderCharts(latestSimulationResult);
-    return;
-  }
-
-  updateChartStatus(getChartSelectionMessage().replace("Showing", "Ready to show"), "active");
+  if (latestSimulationResult) { renderCharts(latestSimulationResult); return; }
+  updateChartStatus(getChartSelectionMessage(), "active");
 }
 
 function handleComparisonToggle() {
   applyChartSelection();
-
   if (latestSimulationResult && document.getElementById("liveChartsToggle").checked) {
     renderCharts(latestSimulationResult);
     return;
   }
-
   updateChartStatus(getChartSelectionMessage(), isComparisonModeEnabled() ? "active" : "idle");
 }
 
+function isComparisonModeEnabled() {
+  return document.getElementById("comparisonModeToggle").checked;
+}
+
+/* ─── TIMELINE ─── */
 function loadTimeline(timeline) {
   timelineState = {
     timeline,
@@ -684,30 +635,17 @@ function loadTimeline(timeline) {
     animationFrame: null,
     playbackDurationMs: getPlaybackDuration(timeline.totalTime)
   };
-
   updateTimelineVisuals();
-  updateTimelineBanner("Playback ready. Press play to animate the schedule clock across all cores.", 0, timeline.totalTime);
+  updateTimelineBanner("Playback ready. Press play to animate the schedule.", 0, timeline.totalTime);
   syncTimelineControls();
   playTimeline();
 }
 
 function playTimeline() {
-  if (!timelineState.timeline) {
-    updateTimelineBanner("Run a simulation first to unlock timeline playback controls.", 0, 0);
-    return;
-  }
-
-  if (timelineState.isPlaying) {
-    return;
-  }
-
-  if (timelineState.completed) {
-    timelineState.currentTime = 0;
-    timelineState.completed = false;
-  }
-
+  if (!timelineState.timeline) { updateTimelineBanner("Run a simulation first.", 0, 0); return; }
+  if (timelineState.isPlaying) return;
+  if (timelineState.completed) { timelineState.currentTime = 0; timelineState.completed = false; }
   const totalTime = timelineState.timeline.totalTime || 0;
-
   timelineState.isPlaying = true;
   timelineState.animationStartedAt = performance.now() - ((timelineState.currentTime / Math.max(totalTime, 1)) * timelineState.playbackDurationMs);
   syncTimelineControls();
@@ -715,50 +653,34 @@ function playTimeline() {
 }
 
 function pauseTimeline() {
-  if (!timelineState.timeline || !timelineState.isPlaying) {
-    return;
-  }
-
+  if (!timelineState.timeline || !timelineState.isPlaying) return;
   timelineState.isPlaying = false;
   resetTimelineAnimation();
   updateTimelineVisuals();
-  updateTimelineBanner("Timeline paused. Press play to continue from the current simulation clock.", timelineState.currentTime, timelineState.timeline.totalTime);
+  updateTimelineBanner("Timeline paused.", timelineState.currentTime, timelineState.timeline.totalTime);
   syncTimelineControls();
 }
 
 function replayTimeline() {
-  if (!timelineState.timeline) {
-    updateTimelineBanner("Run a simulation first to replay the CPU execution timeline.", 0, 0);
-    return;
-  }
-
+  if (!timelineState.timeline) { updateTimelineBanner("Run a simulation first.", 0, 0); return; }
   resetTimelineAnimation();
   timelineState.currentTime = 0;
-  timelineState.completed = false;
-  timelineState.isPlaying = false;
+  timelineState.completed   = false;
+  timelineState.isPlaying   = false;
   updateTimelineVisuals();
-  updateTimelineBanner("Replay ready. Press play to restart from t = 0.", 0, timelineState.timeline.totalTime);
+  updateTimelineBanner("Replay ready. Press play to restart.", 0, timelineState.timeline.totalTime);
   syncTimelineControls();
   playTimeline();
 }
 
 function stepTimeline(timestamp) {
-  if (!timelineState.timeline || !timelineState.isPlaying) {
-    return;
-  }
-
+  if (!timelineState.timeline || !timelineState.isPlaying) return;
   const totalTime = timelineState.timeline.totalTime || 0;
-  const elapsed = timestamp - timelineState.animationStartedAt;
+  const elapsed  = timestamp - timelineState.animationStartedAt;
   const progress = Math.min(elapsed / timelineState.playbackDurationMs, 1);
-
   timelineState.currentTime = roundNumber(progress * totalTime);
   updateTimelineVisuals();
-
-  if (progress >= 1) {
-    finishTimelinePlayback();
-    return;
-  }
-
+  if (progress >= 1) { finishTimelinePlayback(); return; }
   timelineState.animationFrame = window.requestAnimationFrame(stepTimeline);
 }
 
@@ -768,61 +690,43 @@ function finishTimelinePlayback() {
   timelineState.currentTime = timelineState.timeline?.totalTime ?? 0;
   resetTimelineAnimation();
   updateTimelineVisuals();
-  updateTimelineBanner("Execution complete. All visible lanes finished their scheduled work.", timelineState.currentTime, timelineState.timeline?.totalTime ?? 0);
+  updateTimelineBanner("Execution complete.", timelineState.currentTime, timelineState.timeline?.totalTime ?? 0);
   syncTimelineControls();
 }
 
 function updateTimelineVisuals() {
-  const totalTime = timelineState.timeline?.totalTime ?? 0;
+  const totalTime   = timelineState.timeline?.totalTime ?? 0;
   const currentTime = timelineState.currentTime;
-  const segments = document.querySelectorAll(".gantt-segment");
-  const cursor = document.getElementById("timelineCursor");
-  const activeSegments = [];
+  const segments    = document.querySelectorAll(".gantt-segment");
+  const cursor      = document.getElementById("timelineCursor");
+  const active      = [];
 
-  if (cursor) {
-    cursor.style.left = `${totalTime > 0 ? Math.min((currentTime / totalTime) * 100, 100) : 0}%`;
-  }
+  if (cursor) cursor.style.left = `${totalTime > 0 ? Math.min((currentTime / totalTime) * 100, 100) : 0}%`;
 
-  segments.forEach(segment => {
-    const start = Number.parseFloat(segment.dataset.start);
-    const end = Number.parseFloat(segment.dataset.end);
-    const progress = currentTime <= start
-      ? 0
-      : currentTime >= end
-        ? 1
-        : (currentTime - start) / Math.max(end - start, 0.01);
-
-    segment.style.setProperty("--segment-progress", `${progress * 100}%`);
-    segment.classList.toggle("pending", progress === 0);
-    segment.classList.toggle("active", progress > 0 && progress < 1);
-    segment.classList.toggle("completed", progress >= 1);
-
-    if (progress > 0 && progress < 1) {
-      activeSegments.push(`${segment.dataset.core}: ${segment.dataset.process}`);
-    }
+  segments.forEach(seg => {
+    const start    = Number.parseFloat(seg.dataset.start);
+    const end      = Number.parseFloat(seg.dataset.end);
+    const progress = currentTime <= start ? 0 : currentTime >= end ? 1 : (currentTime - start) / Math.max(end - start, 0.01);
+    seg.style.setProperty("--segment-progress", `${progress * 100}%`);
+    seg.classList.toggle("pending",   progress === 0);
+    seg.classList.toggle("active",    progress > 0 && progress < 1);
+    seg.classList.toggle("completed", progress >= 1);
+    if (progress > 0 && progress < 1) active.push(`${seg.dataset.core}: ${seg.dataset.process}`);
   });
 
   if (timelineState.completed) {
-    updateTimelineBanner("Execution complete. All visible lanes finished their scheduled work.", currentTime, totalTime);
+    updateTimelineBanner("Execution complete. All lanes finished.", currentTime, totalTime);
     return;
   }
-
   if (!timelineState.timeline) {
-    updateTimelineBanner("Animated playback highlights each core independently as the simulation clock advances.", 0, 0);
+    updateTimelineBanner("Animated playback highlights each core independently.", 0, 0);
     return;
   }
-
-  if (!activeSegments.length && currentTime === 0) {
-    updateTimelineBanner("Playback ready. Press play to animate the schedule clock across all cores.", currentTime, totalTime);
+  if (!active.length && currentTime === 0) {
+    updateTimelineBanner("Playback ready. Press play to animate.", currentTime, totalTime);
     return;
   }
-
-  if (activeSegments.length) {
-    updateTimelineBanner(activeSegments.join(" | "), currentTime, totalTime);
-    return;
-  }
-
-  updateTimelineBanner("No process is executing at this instant. The simulator is between arrivals or after a completion.", currentTime, totalTime);
+  updateTimelineBanner(active.length ? active.join(" | ") : "Between arrivals or after completion.", currentTime, totalTime);
 }
 
 function updateTimelineBanner(message, currentTime, totalTime) {
@@ -831,11 +735,10 @@ function updateTimelineBanner(message, currentTime, totalTime) {
 }
 
 function syncTimelineControls() {
-  const hasTimeline = Boolean(timelineState.timeline);
-
-  document.getElementById("timelinePlayButton").disabled = !hasTimeline || timelineState.isPlaying;
-  document.getElementById("timelinePauseButton").disabled = !hasTimeline || !timelineState.isPlaying;
-  document.getElementById("timelineReplayButton").disabled = !hasTimeline;
+  const has = Boolean(timelineState.timeline);
+  document.getElementById("timelinePlayButton").disabled  = !has || timelineState.isPlaying;
+  document.getElementById("timelinePauseButton").disabled = !has || !timelineState.isPlaying;
+  document.getElementById("timelineReplayButton").disabled= !has;
 }
 
 function resetTimelineAnimation() {
@@ -846,138 +749,43 @@ function resetTimelineAnimation() {
 }
 
 function createTimelineState() {
-  return {
-    timeline: null,
-    currentTime: 0,
-    isPlaying: false,
-    completed: false,
-    animationFrame: null,
-    playbackDurationMs: MIN_PLAYBACK_MS
-  };
+  return { timeline: null, currentTime: 0, isPlaying: false, completed: false, animationFrame: null, playbackDurationMs: MIN_PLAYBACK_MS };
 }
 
 function getPlaybackDuration(totalTime) {
-  if (!totalTime) {
-    return MIN_PLAYBACK_MS;
-  }
-
+  if (!totalTime) return MIN_PLAYBACK_MS;
   return Math.min(MAX_PLAYBACK_MS, Math.max(MIN_PLAYBACK_MS, totalTime * 650));
 }
 
-function isComparisonModeEnabled() {
-  return document.getElementById("comparisonModeToggle").checked;
-}
-
-function formatMode(mode) {
-  if (mode === "power") {
-    return "Power Saver";
-  }
-  if (mode === "performance") {
-    return "Performance";
-  }
-  return "Balanced";
-}
-
-function formatSigned(value) {
-  if (value > 0) {
-    return `+${value}`;
-  }
-  return `${value}`;
-}
-
-function getProcessColor(processId, fallbackIndex = 0) {
-  const numericPart = Number.parseInt(String(processId).replace(/\D/g, ""), 10);
-  const index = Number.isNaN(numericPart) ? fallbackIndex : numericPart - 1;
-  return PROCESS_COLORS[((index % PROCESS_COLORS.length) + PROCESS_COLORS.length) % PROCESS_COLORS.length];
-}
-
-function roundNumber(value) {
-  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-}
-
+/* ─── GAME STATS ─── */
 function buildGameStats(result) {
   const { summary, metrics, processes } = result;
-  const efficiencyScore = clampValue(
+  const eff   = clampValue(
     (metrics.deadlineSuccessRate * 0.36) +
     (summary.energySavingsRate * 0.26) +
     (clampValue(100 - (metrics.averageWaitingTime * 12)) * 0.18) +
     (clampValue(metrics.cpuUtilization) * 0.2)
   );
-  const points = Math.round(
-    (efficiencyScore * 18) +
-    (summary.cores * 55) +
-    (metrics.throughput * 180) -
-    (metrics.missedDeadlines * 45)
-  );
-  const level = Math.max(1, Math.floor(points / 320) + 1);
+  const points = Math.round((eff * 18) + (summary.cores * 55) + (metrics.throughput * 180) - (metrics.missedDeadlines * 45));
+  const level  = Math.max(1, Math.floor(points / 320) + 1);
   const levelProgress = clampValue(((points % 320) / 320) * 100);
   const streak = metrics.missedDeadlines === 0
     ? Math.max(3, Math.round((metrics.deadlineSuccessRate / 10) + (summary.energySavingsRate / 20)))
     : Math.max(1, Math.round(metrics.deadlineSuccessRate / 25));
-  const grade = efficiencyScore >= 92 ? "S+" : efficiencyScore >= 84 ? "A" : efficiencyScore >= 72 ? "B" : efficiencyScore >= 58 ? "C" : "D";
+  const grade = eff >= 92 ? "S+" : eff >= 84 ? "A" : eff >= 72 ? "B" : eff >= 58 ? "C" : "D";
   const badges = [];
 
-  if (metrics.deadlineSuccessRate === 100) {
-    badges.push({
-      icon: "◎",
-      label: "Deadline Guardian",
-      description: "Every process hit its deadline target.",
-      tone: "green"
-    });
-  }
+  if (metrics.deadlineSuccessRate === 100) badges.push({ icon: "◎", label: "Deadline Guardian", description: "Every process hit its deadline.", tone: "green" });
+  if (summary.energySavingsRate >= 30)    badges.push({ icon: "◈", label: "Energy Hunter",     description: "Strong DVFS savings profile.", tone: "blue" });
+  if (metrics.cpuUtilization >= 75)       badges.push({ icon: "✦", label: "Core Commander",    description: "Cores stayed engaged.", tone: "purple" });
+  if (processes.every(p => p.deadlineMet && p.energyDelta <= 0))
+    badges.push({ icon: "⬢", label: "Perfect Sync", description: "Deadlines met, energy below baseline.", tone: "cyan" });
+  if (!badges.length)
+    badges.push({ icon: "◌", label: "Warmup Run", description: "Tune the workload to unlock badges.", tone: "neutral" });
 
-  if (summary.energySavingsRate >= 30) {
-    badges.push({
-      icon: "◈",
-      label: "Energy Hunter",
-      description: "DVFS achieved a strong savings profile.",
-      tone: "blue"
-    });
-  }
-
-  if (metrics.cpuUtilization >= 75) {
-    badges.push({
-      icon: "✦",
-      label: "Core Commander",
-      description: "The cores stayed meaningfully engaged.",
-      tone: "purple"
-    });
-  }
-
-  if (processes.every(process => process.deadlineMet && process.energyDelta <= 0)) {
-    badges.push({
-      icon: "⬢",
-      label: "Perfect Sync",
-      description: "Met deadlines while staying below baseline energy.",
-      tone: "cyan"
-    });
-  }
-
-  if (!badges.length) {
-    badges.push({
-      icon: "◌",
-      label: "Warmup Run",
-      description: "Tune the workload to unlock performance badges.",
-      tone: "neutral"
-    });
-  }
-
-  const titles = [
-    "Queue Cadet",
-    "Latency Ranger",
-    "Deadline Tactician",
-    "Core Strategist",
-    "Neon Scheduler",
-    "Quantum Architect"
-  ];
-
+  const titles = ["Queue Cadet","Latency Ranger","Deadline Tactician","Core Strategist","Neon Scheduler","Quantum Architect"];
   return {
-    points,
-    level,
-    levelProgress,
-    streak,
-    grade,
-    badges,
+    points, level, levelProgress, streak, grade, badges,
     title: titles[Math.min(level - 1, titles.length - 1)],
     focus: metrics.missedDeadlines > 0
       ? "Reduce misses with faster dispatch."
@@ -987,40 +795,28 @@ function buildGameStats(result) {
   };
 }
 
+/* ─── IDLE BUILDERS ─── */
 function buildMissionControlIdle() {
   return `
     <article class="control-card score-card idle-card">
-      <div class="score-headline">
-        <span class="mini-kicker">Command Score</span>
-        <strong>0000</strong>
-      </div>
+      <div class="score-headline"><span class="mini-kicker">Command Score</span><strong>0000</strong></div>
       <div class="level-row">
-        <div>
-          <span class="mini-kicker">Level 1</span>
-          <p>Queue Cadet</p>
-        </div>
-        <div class="streak-pill">
-          <span>Streak</span>
-          <strong>0x</strong>
-        </div>
+        <div><span class="mini-kicker">Level 1</span><p>Queue Cadet</p></div>
+        <div class="streak-pill"><span>Streak</span><strong>0x</strong></div>
       </div>
       <div class="xp-track"><span class="xp-fill" style="width:18%"></span></div>
-      <div class="score-meta">
-        <span>Awaiting run</span>
-        <span>Telemetry offline</span>
-        <span>Rewards locked</span>
-      </div>
+      <div class="score-meta"><span>Awaiting run</span><span>Telemetry offline</span><span>Rewards locked</span></div>
     </article>
     <article class="control-card gauge-card">
-      ${renderGauge("CPU Load", 18, "--", "blue")}
-      ${renderGauge("Queue Flow", 24, "--", "purple")}
-      ${renderGauge("Turnaround", 30, "--", "green")}
+      ${renderGauge("CPU Load", 18, "—", "blue")}
+      ${renderGauge("Queue Flow", 24, "—", "purple")}
+      ${renderGauge("Turnaround", 30, "—", "green")}
     </article>
     <article class="control-card mission-log idle-card">
       <div class="log-row"><span class="mini-kicker">Live Mode</span><strong>Balanced</strong></div>
       <div class="log-row"><span class="mini-kicker">Core Mesh</span><strong>Awaiting input</strong></div>
       <div class="log-row"><span class="mini-kicker">Playback</span><strong>Standby</strong></div>
-      <div class="log-row"><span class="mini-kicker">Tactical Hint</span><strong>Launch a run to score your scheduler.</strong></div>
+      <div class="log-row"><span class="mini-kicker">Focus</span><strong>Launch a run to score.</strong></div>
     </article>
   `;
 }
@@ -1029,10 +825,7 @@ function buildAchievementRackIdle() {
   return `
     <article class="achievement-badge neutral">
       <span class="badge-icon">◌</span>
-      <div>
-        <strong>Achievement Bay</strong>
-        <p>Run the simulator to unlock scheduler badges.</p>
-      </div>
+      <div><strong>Achievements</strong><p>Run the simulator to unlock badges.</p></div>
     </article>
   `;
 }
@@ -1040,21 +833,15 @@ function buildAchievementRackIdle() {
 function buildPerformancePulseIdle() {
   return `
     <div class="pulse-header">
-      <div>
-        <p class="mini-kicker">Performance Pulse</p>
-        <h3>Gamified Efficiency Tracks</h3>
-      </div>
-      <div class="pulse-score">--</div>
+      <div><p class="mini-kicker">Performance Pulse</p><h3>Efficiency Tracks</h3></div>
+      <div class="pulse-score">—</div>
     </div>
     <div class="pulse-grid">
-      ${["CPU Usage", "Waiting Pressure", "Turnaround Tempo", "Energy Efficiency"].map((label, index) => `
+      ${["CPU Usage","Waiting Pressure","Turnaround Tempo","Energy Efficiency"].map((label, i) => `
         <div class="pulse-track-card">
-          <div class="pulse-track-top">
-            <span>${label}</span>
-            <strong>Awaiting run</strong>
-          </div>
+          <div class="pulse-track-top"><span>${label}</span><strong>Awaiting run</strong></div>
           <div class="pulse-track">
-            <span class="pulse-track-fill ${["blue", "purple", "green", "cyan"][index]}" style="width:${20 + (index * 8)}%"></span>
+            <span class="pulse-track-fill ${["blue","purple","green","cyan"][i]}" style="width:${20 + i * 8}%"></span>
           </div>
         </div>
       `).join("")}
@@ -1062,27 +849,91 @@ function buildPerformancePulseIdle() {
   `;
 }
 
+/* ─── FORMAT HELPERS ─── */
+function formatMode(mode) {
+  if (mode === "power")       return "Power Saver";
+  if (mode === "performance") return "Performance";
+  return "Balanced";
+}
+
+function formatSigned(value) {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function getProcessColor(processId, fallback = 0) {
+  const n = Number.parseInt(String(processId).replace(/\D/g, ""), 10);
+  const i = Number.isNaN(n) ? fallback : n - 1;
+  return PROCESS_COLORS[((i % PROCESS_COLORS.length) + PROCESS_COLORS.length) % PROCESS_COLORS.length];
+}
+
+function roundNumber(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
 function clampValue(value, min = 0, max = 100) {
   return Math.min(max, Math.max(min, roundNumber(value)));
 }
 
+/* ─── TOOLTIP ─── */
+function initTooltips() {
+  const tip = document.getElementById("tooltipEl");
+
+  function show(el, text) {
+    tip.textContent = text;
+    tip.classList.add("visible");
+    moveTip(el);
+  }
+
+  function moveTip(el) {
+    const rect = el.getBoundingClientRect();
+    tip.style.top  = `${rect.bottom + 8}px`;
+    tip.style.left = `${Math.min(rect.left, window.innerWidth - tip.offsetWidth - 12)}px`;
+  }
+
+  function hide() {
+    tip.classList.remove("visible");
+  }
+
+  document.addEventListener("mouseover", e => {
+    const el = e.target.closest("[data-tip]");
+    if (el) show(el, el.dataset.tip);
+  });
+
+  document.addEventListener("mouseout", e => {
+    if (e.target.closest("[data-tip]")) hide();
+  });
+}
+
+/* ─── INIT ─── */
 function initialize() {
+  initTabs();
+  initTooltips();
   loadDemoData();
   clearResults();
   setServerBadge("Waiting for API");
   applyChartSelection();
   checkApiHealth();
+
+  // Wire algorithm dropdown to quantum field visibility
+  const algoSelect = document.getElementById("algorithm");
+  if (algoSelect) {
+    algoSelect.addEventListener("change", handleAlgorithmChange);
+    updateQuantumVisibility(); // set initial state
+  }
 }
 
-window.addRow = addRow;
-window.deleteRow = deleteRow;
-window.loadDemoData = loadDemoData;
-window.runSimulation = runSimulation;
-window.handleChartSelection = handleChartSelection;
-window.handleLiveToggle = handleLiveToggle;
+/* ─── GLOBALS (for inline HTML events) ─── */
+window.addRow              = addRow;
+window.deleteRow           = deleteRow;
+window.loadDemoData        = loadDemoData;
+window.runSimulation       = runSimulation;
+window.handleChartSelection= handleChartSelection;
+window.handleLiveToggle    = handleLiveToggle;
 window.handleComparisonToggle = handleComparisonToggle;
-window.playTimeline = playTimeline;
-window.pauseTimeline = pauseTimeline;
-window.replayTimeline = replayTimeline;
+window.handleGamificationToggle = handleGamificationToggle;
+window.handleAlgorithmChange  = handleAlgorithmChange;
+window.playTimeline        = playTimeline;
+window.pauseTimeline       = pauseTimeline;
+window.replayTimeline      = replayTimeline;
 
 initialize();

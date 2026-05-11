@@ -10,46 +10,37 @@
 </head>
 <body>
   <div class="page-shell">
+
+    <!-- ─── HEADER ─── -->
     <header class="hero">
       <div>
         <p class="eyebrow">Operating Systems Lab</p>
-        <h1>Energy-Aware CPU Scheduling Simulator</h1>
-        <p class="hero-copy">
-          Command a futuristic scheduling arena with live execution telemetry, energy tactics, and performance-driven rewards.
-        </p>
+        <h1>Energy-Aware CPU Scheduler</h1>
+        <p class="hero-copy">Simulate multi-core CPU scheduling with real-time energy telemetry, DVFS modeling, and algorithm comparison.</p>
       </div>
       <div class="hero-status-stack">
         <div id="serverStatus" class="server-badge pending">Waiting for API</div>
-        <div class="hero-chip">Neumorphic Control Grid</div>
       </div>
     </header>
 
     <main class="dashboard">
-      <section class="panel panel-hud">
-        <div class="section-heading compact-heading">
-          <div>
-            <p class="section-kicker">Mission Control</p>
-            <h2>Scheduler Performance Deck</h2>
-          </div>
-          <div class="hero-badges">
-            <span class="hero-chip accent-blue">Realtime Simulation</span>
-            <span class="hero-chip accent-green">Gamified Analytics</span>
-            <span class="hero-chip accent-purple">Dark Control Mode</span>
-          </div>
-        </div>
 
-        <div id="missionControl" class="mission-grid"></div>
-      </section>
-
+      <!-- ─── SECTION 1: PROCESS INPUT ─── -->
       <section class="panel panel-processes">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Workload</p>
-            <h2>Processes</h2>
+            <p class="section-kicker">Step 1</p>
+            <h2>Process Input</h2>
           </div>
           <div class="table-actions">
-            <button class="secondary-btn" type="button" onclick="loadDemoData()">Load Demo</button>
-            <button class="secondary-btn" type="button" onclick="addRow()">Add Process</button>
+            <button class="secondary-btn" type="button" onclick="loadDemoData()" title="Load 3 sample processes">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              Load Sample Data
+            </button>
+            <button class="primary-btn-sm" type="button" onclick="addRow()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Process
+            </button>
           </div>
         </div>
 
@@ -58,10 +49,19 @@
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Arrival</th>
-                <th>Burst</th>
-                <th>Deadline</th>
-                <th>Action</th>
+                <th>
+                  Arrival
+                  <span class="th-tooltip" data-tip="Time when the process enters the ready queue">?</span>
+                </th>
+                <th>
+                  Burst
+                  <span class="th-tooltip" data-tip="CPU time required to complete the process">?</span>
+                </th>
+                <th>
+                  Deadline
+                  <span class="th-tooltip" data-tip="Latest time by which the process must complete (0 = none)">?</span>
+                </th>
+                <th aria-label="Remove"></th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -69,24 +69,29 @@
         </div>
       </section>
 
+      <!-- ─── SECTION 2: SIMULATION SETUP ─── -->
       <section class="panel panel-config">
         <div class="section-heading">
           <div>
-            <p class="section-kicker">Configuration</p>
+            <p class="section-kicker">Step 2</p>
             <h2>Simulation Setup</h2>
           </div>
         </div>
 
+        <!-- Basic settings always visible -->
         <div class="config-grid">
           <label class="field">
-            <span>Cores</span>
+            <span>
+              Cores
+              <span class="field-tooltip" data-tip="Number of parallel CPU cores">?</span>
+            </span>
             <input type="number" id="cores" value="2" min="1" max="8" />
           </label>
 
           <label class="field">
-            <span>Primary Algorithm</span>
-            <select id="algorithm">
-              <option value="EATS">Energy-Aware Scheduler</option>
+            <span>Algorithm</span>
+            <select id="algorithm" onchange="handleAlgorithmChange()">
+              <option value="EATS">Energy-Aware (EATS)</option>
               <option value="EDF">EDF</option>
               <option value="RR">Round Robin</option>
               <option value="SJF">SJF</option>
@@ -94,163 +99,217 @@
             </select>
           </label>
 
-          <label class="field">
-            <span>DVFS Mode</span>
-            <select id="mode">
-              <option value="power">Power Saver</option>
-              <option value="balanced" selected>Balanced</option>
-              <option value="performance">Performance</option>
-            </select>
-          </label>
-
-          <label class="field">
-            <span>RR Quantum</span>
+          <label class="field" id="quantumField">
+            <span>
+              RR Quantum
+              <span class="field-tooltip" data-tip="Time slice per process in Round Robin scheduling">?</span>
+            </span>
             <input type="number" id="quantum" value="2" min="1" />
           </label>
         </div>
 
-        <div class="config-inline">
-          <label class="toggle-field toggle-card" for="comparisonModeToggle">
-            <span>
-              <strong>Comparison Mode</strong>
-              <small>Benchmark FCFS, SJF, RR, EDF, and EATS against the same process set.</small>
-            </span>
+        <!-- Toggles row -->
+        <div class="toggles-row">
+          <label class="toggle-pill" for="comparisonModeToggle">
             <span class="toggle-switch">
               <input id="comparisonModeToggle" type="checkbox" onchange="handleComparisonToggle()" />
               <span class="toggle-slider"></span>
             </span>
-          </label>
-        </div>
-
-        <div class="actions-row">
-          <button id="runButton" class="run-btn" type="button" onclick="runSimulation()">Run Simulation</button>
-        </div>
-      </section>
-
-      <section class="panel panel-results">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Results</p>
-            <h2>Scheduler Insights</h2>
-          </div>
-        </div>
-
-        <div id="statusMessage" class="status-banner info">
-          Demo processes loaded. Run the simulator when you are ready.
-        </div>
-
-        <div id="achievementRack" class="achievement-rack"></div>
-        <div id="summaryCards" class="summary-grid"></div>
-        <div id="performancePulse" class="performance-pulse"></div>
-        <div id="metrics" class="metrics-panel"></div>
-        <div id="insightsPanel" class="insights-panel"></div>
-      </section>
-
-      <section class="panel panel-timeline">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Timeline</p>
-            <h2>Execution Gantt View</h2>
-          </div>
-          <div class="timeline-controls">
-            <button id="timelinePlayButton" class="secondary-btn" type="button" onclick="playTimeline()">Play</button>
-            <button id="timelinePauseButton" class="secondary-btn" type="button" onclick="pauseTimeline()">Pause</button>
-            <button id="timelineReplayButton" class="secondary-btn" type="button" onclick="replayTimeline()">Replay</button>
-          </div>
-        </div>
-        <div class="timeline-header">
-          <div id="timelineLegend" class="timeline-legend">
-            Animated playback highlights each core independently as the simulation clock advances.
-          </div>
-          <div id="timelineClock" class="timeline-clock">t = 0</div>
-        </div>
-        <div id="gantt" class="gantt-grid"></div>
-      </section>
-
-      <section class="panel panel-process-metrics">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Process Metrics</p>
-            <h2>Per-Process Breakdown</h2>
-          </div>
-        </div>
-        <div id="processMetrics"></div>
-      </section>
-
-      <section class="panel panel-charts">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Charts</p>
-            <h2>Performance Visualizations</h2>
-          </div>
-        </div>
-
-        <div class="chart-toolbar">
-          <label class="field compact-field">
-            <span>Chart View</span>
-            <select id="chartViewSelect" onchange="handleChartSelection()">
-              <option value="all">All Charts</option>
-              <option value="energy">Energy vs Time</option>
-              <option value="comparison">Algorithm Comparison</option>
-              <option value="utilization">CPU Utilization</option>
-            </select>
+            <span>
+              Comparison Mode
+              <small>Benchmark all algorithms side-by-side</small>
+            </span>
           </label>
 
-          <label class="toggle-field" for="liveChartsToggle">
-            <span>Live Chart Updates</span>
+          <label class="toggle-pill" for="gamificationToggle">
             <span class="toggle-switch">
-              <input id="liveChartsToggle" type="checkbox" checked onchange="handleLiveToggle()" />
+              <input id="gamificationToggle" type="checkbox" onchange="handleGamificationToggle()" />
               <span class="toggle-slider"></span>
+            </span>
+            <span>
+              Gamification
+              <small>Show score, badges &amp; streak</small>
             </span>
           </label>
         </div>
 
-        <div id="chartLiveStatus" class="chart-status">
-          Showing all charts with live updates enabled.
+        <!-- Advanced settings collapsible -->
+        <details class="advanced-settings" id="advancedSettings">
+          <summary class="advanced-toggle">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="chevron-icon" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            Advanced Settings
+          </summary>
+          <div class="advanced-body">
+            <label class="field">
+              <span>
+                DVFS Mode
+                <span class="field-tooltip" data-tip="Dynamic Voltage &amp; Frequency Scaling strategy">?</span>
+              </span>
+              <select id="mode">
+                <option value="power">Power Saver (0.8 GHz)</option>
+                <option value="balanced" selected>Balanced (1.2 GHz)</option>
+                <option value="performance">Performance (2.0 GHz)</option>
+              </select>
+            </label>
+          </div>
+        </details>
+      </section>
+
+      <!-- ─── SECTION 3: RUN SIMULATION ─── -->
+      <section class="panel panel-run">
+        <div class="run-step-label">
+          <p class="section-kicker" style="margin:0;">Step 3</p>
+        </div>
+        <button id="runButton" class="run-btn" type="button" onclick="runSimulation()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run Simulation
+        </button>
+
+        <div id="statusMessage" class="status-banner info">
+          Load sample data or enter processes, then run the simulator.
+        </div>
+      </section>
+
+      <!-- ─── SECTION 4: RESULTS ─── -->
+      <section class="panel panel-results" id="resultsPanel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Step 4</p>
+            <h2>Results</h2>
+          </div>
         </div>
 
-        <div class="chart-grid">
-          <article class="chart-card chart-card-hero" data-chart="energy">
-            <h3>Energy vs Time</h3>
-            <canvas id="energyChart"></canvas>
-          </article>
+        <!-- Tab Nav -->
+        <nav class="results-tabs" role="tablist" aria-label="Results sections">
+          <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="tab-summary" data-tab="summary">
+            Summary
+          </button>
+          <button class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-gantt" data-tab="gantt">
+            Gantt Timeline
+          </button>
+          <button class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-perprocess" data-tab="perprocess">
+            Per-Process
+          </button>
+          <button class="tab-btn" role="tab" aria-selected="false" aria-controls="tab-charts" data-tab="charts">
+            Charts
+          </button>
+        </nav>
 
-          <article class="chart-card chart-card-stat" data-chart="comparison">
-            <h3>Average Waiting Time</h3>
-            <canvas id="comparisonWaitingChart"></canvas>
-          </article>
+        <!-- ── TAB: SUMMARY ── -->
+        <div class="tab-panel active" id="tab-summary" role="tabpanel">
 
-          <article class="chart-card chart-card-stat" data-chart="comparison">
-            <h3>Average Turnaround Time</h3>
-            <canvas id="comparisonTurnaroundChart"></canvas>
-          </article>
+          <!-- Top metrics (always visible, no clutter) -->
+          <div id="summaryCards" class="summary-grid"></div>
 
-          <article class="chart-card chart-card-stat" data-chart="comparison">
-            <h3>Total Energy Consumption</h3>
-            <canvas id="comparisonEnergyChart"></canvas>
-          </article>
+          <!-- Gamification area (hidden by default) -->
+          <div id="gamificationBlock" class="gamification-block" style="display:none;">
+            <div id="missionControl" class="mission-grid"></div>
+            <div id="achievementRack" class="achievement-rack"></div>
+            <div id="performancePulse" class="performance-pulse"></div>
+          </div>
 
-          <article class="chart-card chart-card-stat" data-chart="comparison">
-            <h3>Deadline Success Rate</h3>
-            <canvas id="comparisonDeadlineChart"></canvas>
-          </article>
+          <!-- Detail metrics -->
+          <div id="metrics" class="metrics-panel"></div>
 
-          <article class="chart-card chart-card-wide" data-chart="utilization">
-            <h3>CPU Utilization</h3>
-            <canvas id="utilizationChart"></canvas>
-          </article>
+          <!-- Insights -->
+          <div id="insightsPanel" class="insights-panel"></div>
         </div>
+
+        <!-- ── TAB: GANTT ── -->
+        <div class="tab-panel" id="tab-gantt" role="tabpanel">
+          <div class="timeline-topbar">
+            <div class="timeline-header">
+              <div id="timelineLegend" class="timeline-legend">
+                Animated playback highlights each core independently as the simulation clock advances.
+              </div>
+              <div id="timelineClock" class="timeline-clock">t = 0</div>
+            </div>
+            <div class="timeline-controls">
+              <button id="timelinePlayButton" class="secondary-btn" type="button" onclick="playTimeline()">▶ Play</button>
+              <button id="timelinePauseButton" class="secondary-btn" type="button" onclick="pauseTimeline()">⏸ Pause</button>
+              <button id="timelineReplayButton" class="secondary-btn" type="button" onclick="replayTimeline()">↺ Replay</button>
+            </div>
+          </div>
+          <div id="gantt" class="gantt-grid">
+            <p class="empty-state">Run a simulation to generate a schedule timeline.</p>
+          </div>
+        </div>
+
+        <!-- ── TAB: PER-PROCESS ── -->
+        <div class="tab-panel" id="tab-perprocess" role="tabpanel">
+          <div id="processMetrics">
+            <p class="empty-state">Per-process metrics will appear after a simulation run.</p>
+          </div>
+        </div>
+
+        <!-- ── TAB: CHARTS ── -->
+        <div class="tab-panel" id="tab-charts" role="tabpanel">
+          <div class="chart-toolbar">
+            <label class="field compact-field">
+              <span>Chart View</span>
+              <select id="chartViewSelect" onchange="handleChartSelection()">
+                <option value="all">All Charts</option>
+                <option value="energy">Energy vs Time</option>
+                <option value="comparison">Algorithm Comparison</option>
+                <option value="utilization">CPU Utilization</option>
+              </select>
+            </label>
+
+            <label class="toggle-pill compact" for="liveChartsToggle">
+              <span class="toggle-switch">
+                <input id="liveChartsToggle" type="checkbox" checked onchange="handleLiveToggle()" />
+                <span class="toggle-slider"></span>
+              </span>
+              <span>Live Updates</span>
+            </label>
+          </div>
+
+          <div id="chartLiveStatus" class="chart-status">
+            Showing all charts with live updates enabled.
+          </div>
+
+          <div class="chart-grid">
+            <article class="chart-card chart-card-hero" data-chart="energy">
+              <h3>Energy vs Time</h3>
+              <canvas id="energyChart"></canvas>
+            </article>
+            <article class="chart-card chart-card-stat" data-chart="comparison">
+              <h3>Average Waiting Time</h3>
+              <canvas id="comparisonWaitingChart"></canvas>
+            </article>
+            <article class="chart-card chart-card-stat" data-chart="comparison">
+              <h3>Average Turnaround Time</h3>
+              <canvas id="comparisonTurnaroundChart"></canvas>
+            </article>
+            <article class="chart-card chart-card-stat" data-chart="comparison">
+              <h3>Total Energy Consumption</h3>
+              <canvas id="comparisonEnergyChart"></canvas>
+            </article>
+            <article class="chart-card chart-card-stat" data-chart="comparison">
+              <h3>Deadline Success Rate</h3>
+              <canvas id="comparisonDeadlineChart"></canvas>
+            </article>
+            <article class="chart-card chart-card-wide" data-chart="utilization">
+              <h3>CPU Utilization</h3>
+              <canvas id="utilizationChart"></canvas>
+            </article>
+          </div>
+        </div>
+
       </section>
     </main>
 
     <footer class="site-footer">
-      <p class="footer-copy">© 2026 Om Rajpurohit. Energy-Aware CPU Scheduling Simulator.</p>
+      <p class="footer-copy">© 2026 Om Rajpurohit — Energy-Aware CPU Scheduling Simulator</p>
       <div class="footer-actions">
         <a class="footer-btn" href="https://github.com/OmRajpurohit/cpu-scheduling-algo" target="_blank" rel="noreferrer">GitHub</a>
         <a class="footer-btn" href="https://github.com/OmRajpurohit/cpu-scheduling-algo/issues/new" target="_blank" rel="noreferrer">Feedback</a>
       </div>
     </footer>
   </div>
+
+  <!-- Tooltip container -->
+  <div id="tooltipEl" class="tooltip-el" role="tooltip" aria-hidden="true"></div>
 
   <script type="module" src="app.js"></script>
 </body>
