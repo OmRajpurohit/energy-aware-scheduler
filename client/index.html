@@ -230,8 +230,56 @@
               <button id="timelineReplayButton" class="secondary-btn" type="button" onclick="replayTimeline()">↺ Replay</button>
             </div>
           </div>
+
+          <!-- Gantt lanes -->
           <div id="gantt" class="gantt-grid">
             <p class="empty-state">Run a simulation to generate a schedule timeline.</p>
+          </div>
+
+          <!-- ── REAL-TIME ENERGY MONITOR ── -->
+          <div id="energyMeterPanel" class="energy-meter-panel" style="display:none;">
+
+            <!-- Top stats row -->
+            <div class="em-header">
+              <div class="em-title">
+                <p class="section-kicker" style="margin:0;">Live Energy Monitor</p>
+              </div>
+              <div class="em-stats" id="emStats">
+                <div class="em-stat">
+                  <span>Consumed</span>
+                  <strong id="emTotal">0.00 J</strong>
+                </div>
+                <div class="em-stat em-stat-cyan">
+                  <span>Rate</span>
+                  <strong id="emRate">0.00 J/t</strong>
+                </div>
+                <div class="em-stat em-stat-purple">
+                  <span>Peak Rate</span>
+                  <strong id="emPeak">0.00 J/t</strong>
+                </div>
+                <div class="em-stat em-stat-green">
+                  <span>Saved vs Baseline</span>
+                  <strong id="emSaved">—</strong>
+                </div>
+                <div class="em-stat em-stat-orange">
+                  <span>Efficiency</span>
+                  <strong id="emEfficiency">—</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sparkline chart -->
+            <div class="em-sparkline-wrap">
+              <div class="em-sparkline-yaxis" id="emYAxis"></div>
+              <div class="em-sparkline-area">
+                <canvas id="emCanvas"></canvas>
+                <div class="em-sparkline-xaxis" id="emXAxis"></div>
+              </div>
+            </div>
+
+            <!-- Per-core breakdown bars -->
+            <div class="em-cores" id="emCores"></div>
+
           </div>
         </div>
 

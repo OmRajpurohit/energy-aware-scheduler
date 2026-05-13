@@ -365,6 +365,7 @@ function renderGantt(timeline) {
 
   if (!timeline?.lanes?.length || timeline.totalTime <= 0) {
     container.innerHTML = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
+    document.getElementById("energyMeterPanel").style.display = "none";
     timelineState = createTimelineState();
     updateTimelineBanner("Animated playback highlights each core independently as the simulation clock advances.", 0, 0);
     syncTimelineControls();
@@ -482,6 +483,7 @@ function clearResults() {
   document.getElementById("metrics").innerHTML         = "";
   document.getElementById("insightsPanel").innerHTML   = "";
   document.getElementById("gantt").innerHTML           = `<p class="empty-state">Run a simulation to generate a schedule timeline.</p>`;
+  document.getElementById("energyMeterPanel").style.display = "none";
   document.getElementById("processMetrics").innerHTML  = `<p class="empty-state">Per-process metrics will appear after a simulation run.</p>`;
 
   // Respect gamification toggle
@@ -635,6 +637,12 @@ function loadTimeline(timeline) {
     animationFrame: null,
     playbackDurationMs: getPlaybackDuration(timeline.totalTime)
   };
+  // Reset energy monitor history so replay starts fresh
+  emState.history = [];
+  emState.peakRate = 0;
+  emState.lastSampledTime = -1;
+  // Init energy monitor with timeline + summary from latest result
+  initEnergyMonitor(timeline, latestSimulationResult?.summary ?? null);
   updateTimelineVisuals();
   updateTimelineBanner("Playback ready. Press play to animate the schedule.", 0, timeline.totalTime);
   syncTimelineControls();
@@ -667,6 +675,13 @@ function replayTimeline() {
   timelineState.currentTime = 0;
   timelineState.completed   = false;
   timelineState.isPlaying   = false;
+  // Reset energy monitor for fresh replay
+  emState.history = [];
+  emState.peakRate = 0;
+  emState.lastSampledTime = -1;
+  renderEMStats(0, 0, 0, new Array(emState.coreCount).fill(0));
+  renderEMSparkline(timelineState.timeline.totalTime);
+  updateCoreBarDOM(new Array(emState.coreCount).fill(0));
   updateTimelineVisuals();
   updateTimelineBanner("Replay ready. Press play to restart.", 0, timelineState.timeline.totalTime);
   syncTimelineControls();
@@ -694,6 +709,306 @@ function finishTimelinePlayback() {
   syncTimelineControls();
 }
 
+/* ─── ENERGY MONITOR STATE ─── */
+const emState = {
+  canvas: null,
+  ctx: null,
+  // Raw per-segment energy values extracted from timeline
+  segments: [],           // [{start, end, coreIndex, energyPerUnit, totalEnergy, process}]
+  coreCount: 0,
+  totalFinalEnergy: 0,
+  baselineEnergy: 0,
+  // Live history (one entry per animation frame sample)
+  history: [],            // [{t, cumulative, rate, perCore:[]}]
+  peakRate: 0,
+  lastSampledTime: -1,
+  HISTORY_SAMPLES: 120,   // max points on sparkline
+};
+
+function initEnergyMonitor(timeline, summary) {
+  const panel = document.getElementById("energyMeterPanel");
+  if (!timeline?.lanes?.length) { panel.style.display = "none"; return; }
+
+  // Parse energyPerUnit from each segment's energy string (e.g. "1.44 J" → 1.44)
+  // Energy rate = totalEnergy / duration  (J per time unit)
+  const segs = [];
+  timeline.lanes.forEach((lane, li) => {
+    lane.segments.forEach(seg => {
+      const total   = parseEnergyValue(seg.energy);
+      const dur     = Math.max(seg.end - seg.start, 0.01);
+      segs.push({
+        start:         seg.start,
+        end:           seg.end,
+        coreIndex:     li,
+        energyPerUnit: total / dur,
+        totalEnergy:   total,
+        process:       seg.process,
+      });
+    });
+  });
+
+  emState.segments      = segs;
+  emState.coreCount     = timeline.lanes.length;
+  emState.totalFinalEnergy = segs.reduce((s, sg) => s + sg.totalEnergy, 0);
+  emState.baselineEnergy   = parseEnergyValue(summary?.baselineEnergy ?? "0");
+  emState.history       = [];
+  emState.peakRate      = 0;
+  emState.lastSampledTime = -1;
+
+  // Build per-core DOM bars
+  buildCoreBreakdownBars(timeline.lanes);
+
+  // Init canvas
+  emState.canvas = document.getElementById("emCanvas");
+  emState.ctx    = emState.canvas?.getContext("2d") ?? null;
+
+  // Init x-axis ticks
+  renderEMXAxis(timeline.totalTime);
+
+  panel.style.display = "";
+  renderEMStats(0, 0, 0, new Array(emState.coreCount).fill(0));
+  renderEMSparkline(timeline.totalTime);
+  renderEMYAxis(0);
+}
+
+function parseEnergyValue(str) {
+  if (!str) return 0;
+  const n = Number.parseFloat(String(str).replace(/[^0-9.eE+-]/g, ""));
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function buildCoreBreakdownBars(lanes) {
+  const container = document.getElementById("emCores");
+  container.innerHTML = lanes.map((lane, i) => `
+    <div class="em-core-bar" id="emCore${i}">
+      <div class="em-core-bar-header">
+        <span class="em-core-bar-label">${lane.label}</span>
+        <span class="em-core-bar-value" id="emCoreVal${i}">0.00 J</span>
+      </div>
+      <div class="em-core-track">
+        <span class="em-core-fill em-core-fill-${i % 8}" id="emCoreFill${i}" style="width:0%"></span>
+      </div>
+      <div class="em-core-bar-rate" id="emCoreRate${i}">0.00 J/t</div>
+    </div>
+  `).join("");
+}
+
+function renderEMXAxis(totalTime) {
+  const el = document.getElementById("emXAxis");
+  const steps = 5;
+  el.innerHTML = Array.from({ length: steps + 1 }, (_, i) =>
+    `<span>${roundNumber((totalTime / steps) * i)}</span>`
+  ).join("");
+}
+
+/* Called every animation frame from updateTimelineVisuals */
+function tickEnergyMonitor(currentTime, totalTime) {
+  if (!emState.canvas || emState.segments.length === 0) return;
+
+  // Sample at most every 0.1 sim-time units to avoid over-populating
+  if (Math.abs(currentTime - emState.lastSampledTime) < 0.05 && currentTime < totalTime) return;
+  emState.lastSampledTime = currentTime;
+
+  // Compute cumulative energy consumed up to currentTime
+  let cumulative = 0;
+  const perCore  = new Array(emState.coreCount).fill(0);
+
+  for (const seg of emState.segments) {
+    if (currentTime <= seg.start) continue;
+    const activeUntil = Math.min(currentTime, seg.end);
+    const consumed    = (activeUntil - seg.start) * seg.energyPerUnit;
+    cumulative += consumed;
+    perCore[seg.coreIndex] = (perCore[seg.coreIndex] || 0) + consumed;
+  }
+
+  // Instantaneous rate: energy consumed in last ~0.5 sim units
+  const windowStart  = Math.max(0, currentTime - 0.5);
+  let windowEnergy   = 0;
+  for (const seg of emState.segments) {
+    if (currentTime <= seg.start || windowStart >= seg.end) continue;
+    const from = Math.max(seg.start, windowStart);
+    const to   = Math.min(seg.end,   currentTime);
+    windowEnergy += (to - from) * seg.energyPerUnit;
+  }
+  const rate = windowEnergy / 0.5;
+  if (rate > emState.peakRate) emState.peakRate = rate;
+
+  // Store history point
+  if (emState.history.length >= emState.HISTORY_SAMPLES) emState.history.shift();
+  emState.history.push({ t: currentTime, cumulative, rate, perCore: [...perCore] });
+
+  // Update DOM
+  renderEMStats(cumulative, rate, emState.peakRate, perCore);
+  renderEMSparkline(totalTime);
+  renderEMYAxis(emState.totalFinalEnergy);
+  updateCoreBarDOM(perCore);
+}
+
+function renderEMStats(cumulative, rate, peak, perCore) {
+  const saved = emState.baselineEnergy > 0
+    ? emState.baselineEnergy - cumulative
+    : null;
+  const efficiency = emState.totalFinalEnergy > 0
+    ? clampValue((1 - (cumulative / emState.totalFinalEnergy)) * 100 + 50)
+    : null;
+
+  safeSet("emTotal",      `${cumulative.toFixed(2)} J`);
+  safeSet("emRate",       `${rate.toFixed(2)} J/t`);
+  safeSet("emPeak",       `${peak.toFixed(2)} J/t`);
+  safeSet("emSaved",      saved !== null ? `${saved.toFixed(2)} J` : "—");
+  safeSet("emEfficiency", efficiency !== null ? `${efficiency.toFixed(1)}%` : "—");
+}
+
+function safeSet(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function updateCoreBarDOM(perCore) {
+  const maxVal = Math.max(...perCore, 0.001);
+  perCore.forEach((val, i) => {
+    const pct  = (val / maxVal) * 100;
+    const fill = document.getElementById(`emCoreFill${i}`);
+    const valEl= document.getElementById(`emCoreVal${i}`);
+    const rateEl = document.getElementById(`emCoreRate${i}`);
+    if (fill)  fill.style.width = `${pct}%`;
+    if (valEl) valEl.textContent = `${val.toFixed(2)} J`;
+    // Per-core rate: energy in last 0.5t for this core
+    if (rateEl) {
+      const coreRate = computeCoreRate(i);
+      rateEl.textContent = `${coreRate.toFixed(2)} J/t`;
+    }
+  });
+}
+
+function computeCoreRate(coreIndex) {
+  const h = emState.history;
+  if (h.length < 2) return 0;
+  const last = h[h.length - 1];
+  const prev = h[Math.max(0, h.length - 4)];
+  const dt   = last.t - prev.t;
+  if (dt <= 0) return 0;
+  return Math.max(0, (last.perCore[coreIndex] - prev.perCore[coreIndex])) / dt;
+}
+
+function renderEMSparkline(totalTime) {
+  const canvas = emState.canvas;
+  const ctx    = emState.ctx;
+  if (!canvas || !ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.clientWidth  || canvas.offsetWidth  || 400;
+  const H   = canvas.clientHeight || canvas.offsetHeight || 130;
+
+  if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+  }
+
+  ctx.clearRect(0, 0, W, H);
+
+  const history = emState.history;
+  const maxE    = emState.totalFinalEnergy || 1;
+  const PAD     = { top: 6, right: 6, bottom: 4, left: 2 };
+  const plotW   = W - PAD.left - PAD.right;
+  const plotH   = H - PAD.top  - PAD.bottom;
+
+  if (history.length < 2) {
+    // Draw empty grid
+    drawEMGrid(ctx, PAD, plotW, plotH, W, H);
+    return;
+  }
+
+  // X: map sim-time 0..totalTime → plot pixels
+  const xFor = t => PAD.left + (t / Math.max(totalTime, 0.001)) * plotW;
+  // Y: map energy 0..maxE → plot pixels (inverted)
+  const yFor = e => PAD.top  + plotH - (e / maxE) * plotH;
+
+  drawEMGrid(ctx, PAD, plotW, plotH, W, H);
+
+  // ── Draw cumulative energy fill ──
+  ctx.save();
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + plotH);
+  grad.addColorStop(0,   "rgba(24, 215, 255, 0.38)");
+  grad.addColorStop(0.6, "rgba(91, 140, 255, 0.20)");
+  grad.addColorStop(1,   "rgba(91, 140, 255, 0.04)");
+
+  ctx.beginPath();
+  ctx.moveTo(xFor(history[0].t), yFor(0));
+  history.forEach(pt => ctx.lineTo(xFor(pt.t), yFor(pt.cumulative)));
+  ctx.lineTo(xFor(history[history.length - 1].t), yFor(0));
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // ── Draw cumulative energy line ──
+  ctx.beginPath();
+  history.forEach((pt, idx) => {
+    idx === 0 ? ctx.moveTo(xFor(pt.t), yFor(pt.cumulative)) : ctx.lineTo(xFor(pt.t), yFor(pt.cumulative));
+  });
+  ctx.strokeStyle = "rgba(24, 215, 255, 0.92)";
+  ctx.lineWidth   = 2.2;
+  ctx.lineJoin    = "round";
+  ctx.lineCap     = "round";
+  ctx.shadowColor = "rgba(24, 215, 255, 0.5)";
+  ctx.shadowBlur  = 10;
+  ctx.stroke();
+  ctx.shadowBlur  = 0;
+  ctx.restore();
+
+  // ── Draw rate line (secondary, dashed) ──
+  const maxRate = Math.max(emState.peakRate, 0.001);
+  ctx.save();
+  ctx.beginPath();
+  history.forEach((pt, idx) => {
+    const ry = PAD.top + plotH - (pt.rate / maxRate) * plotH;
+    idx === 0 ? ctx.moveTo(xFor(pt.t), ry) : ctx.lineTo(xFor(pt.t), ry);
+  });
+  ctx.strokeStyle = "rgba(192, 132, 252, 0.65)";
+  ctx.lineWidth   = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── Live cursor dot ──
+  const last = history[history.length - 1];
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(xFor(last.t), yFor(last.cumulative), 4.5, 0, Math.PI * 2);
+  ctx.fillStyle   = "#18d7ff";
+  ctx.shadowColor = "rgba(24, 215, 255, 0.8)";
+  ctx.shadowBlur  = 14;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawEMGrid(ctx, PAD, plotW, plotH, W, H) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(147, 197, 253, 0.07)";
+  ctx.lineWidth   = 1;
+  const rows = 4;
+  for (let i = 0; i <= rows; i++) {
+    const y = PAD.top + (i / rows) * plotH;
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, y);
+    ctx.lineTo(PAD.left + plotW, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function renderEMYAxis(maxE) {
+  const el = document.getElementById("emYAxis");
+  if (!el) return;
+  const steps = 4;
+  el.innerHTML = Array.from({ length: steps + 1 }, (_, i) => {
+    const val = (maxE / steps) * (steps - i);
+    return `<span>${val.toFixed(1)}</span>`;
+  }).join("");
+}
+
 function updateTimelineVisuals() {
   const totalTime   = timelineState.timeline?.totalTime ?? 0;
   const currentTime = timelineState.currentTime;
@@ -713,6 +1028,9 @@ function updateTimelineVisuals() {
     seg.classList.toggle("completed", progress >= 1);
     if (progress > 0 && progress < 1) active.push(`${seg.dataset.core}: ${seg.dataset.process}`);
   });
+
+  // ── Tick the real-time energy monitor every frame ──
+  tickEnergyMonitor(currentTime, totalTime);
 
   if (timelineState.completed) {
     updateTimelineBanner("Execution complete. All lanes finished.", currentTime, totalTime);
